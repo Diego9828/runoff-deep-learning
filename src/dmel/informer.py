@@ -36,7 +36,7 @@ def prob_attention(q, k, v, factor=5, causal=False):
 
     sampled = torch.randint(L_k, (n_sample,), device=q.device)
     s = (q @ k[:, :, sampled].transpose(-2, -1)) * scale  # [B, H, L_q, n_sample]
-    top = (s.max(-1).values - s.mean(-1)).topk(u, dim=-1).indices  # [B, H, u]
+    top = (s.max(-1).values - s.mean(-1)).topk(u, dim=-1).indices  # [B, H, u] # Kullback-Leibler estimated
 
     if causal:  # self-attention causal: L_q == L_k
         steps = torch.arange(1, L_k + 1, device=v.device, dtype=v.dtype).view(1, 1, -1, 1)
