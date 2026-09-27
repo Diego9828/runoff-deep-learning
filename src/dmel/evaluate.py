@@ -160,11 +160,12 @@ def leakage_study(split, path, n_windows=200, seed=0):
 def markdown(df, digits=3):
     """Tabla markdown simple (evita depender de tabulate)."""
     def fmt(v):
-        if isinstance(v, float) and v.is_integer() and abs(v) >= 1:  # conteos (épocas, cuencas)
+        if not isinstance(v, (float, np.floating)):
+            return str(v)
+        v = float(v)
+        if v.is_integer() and abs(v) >= 1:  # conteos (épocas, cuencas)
             return str(int(v))
-        if isinstance(v, float):
-            return f"{v:.{digits}g}" if abs(v) < 1e-2 else f"{v:.{digits}f}"
-        return str(v)
+        return f"{v:.{digits}g}" if abs(v) < 1e-2 else f"{v:.{digits}f}"
     lines = ["| " + " | ".join([df.index.name or ""] + [str(c) for c in df.columns]) + " |",
              "|" + "---|" * (len(df.columns) + 1)]
     lines += ["| " + " | ".join([str(i)] + [fmt(v) for v in row]) + " |" for i, row in zip(df.index, df.to_numpy())]
