@@ -105,9 +105,12 @@ ventana se descompone **solo con sus 336 h de historia**, igual que en test, don
 
 {{< include results/tables/leakage_val.md >}}
 
-Los componentes lentos (IMF5, IMF6) son los que más cambian al agregar las 48 h futuras, mucho más que el
-control. Es la fuga de información que la descomposición por ventana evita, y también un motivo para
-esperar ganancias menores que las del paper.
+Los componentes rápidos casi no cambian (IMF1: 0.005 contra 0.004 del control). Los lentos, que van al
+LSTM, cambian 4–6 veces más que el control: el residuo 0.179 contra 0.031 e IMF5 0.120 contra 0.021
+desviaciones del caudal. En el ejemplo de la derecha, el residuo calculado con el futuro sube a 0.38 mm/h
+antes de la crecida, mientras el caudal observado sigue en ~0: el componente "sabe" lo que viene. Es la
+fuga de información que la descomposición por ventana evita, y también un motivo para esperar ganancias
+menores que las del paper.
 
 ### 3.2 CEEMDAN y sample entropy implementados desde cero
 
@@ -245,6 +248,11 @@ componentes futuros no existen en inferencia, así que no se supervisa cada rama
 
 {{< include results/tables/training.md >}}
 
+El early stopping cortó DMEL en la época 16 (mejor época 11) y las dos ablaciones en la época 10 (mejor
+época 5); el job completo tomó 1 h 18 min. En los tres casos la pérdida de train sigue bajando mientras la
+de validación se estanca: sin el early stopping los modelos sobreajustarían, así que las 100 épocas del
+paper no tendrían sentido con este volumen de datos.
+
 ## 5. Modelo base y ablaciones
 
 | Corrida | Rama 1 | Rama 2 | Pregunta |
@@ -287,9 +295,18 @@ con $r$ la correlación, $\alpha=\sigma_{\hat{q}}/\sigma_q$ y $\beta=\mu_{\hat{q
 
 ![Distribución del NSE de las 508 cuencas en horizontes clave (test).](results/figures/nse_boxes.png)
 
-::: {.callout-note}
-Interpretación pendiente: se completa con los resultados finales del entrenamiento en KHIPU.
-:::
+- **DMEL supera a la persistencia en el agregado**: NSE mediano de 0.629 contra 0.492, KGE de 0.673 contra
+  0.626 y RMSE de 0.101 contra 0.119 mm/h. Las cuencas con NSE negativo bajan de 74 a 39.
+- **La ventaja aparece en los horizontes largos.** Hasta ~6 h la persistencia es mejor (a 1 h, 0.998
+  contra 0.957): el caudal horario cambia poco y copiar el último valor es difícil de batir. Desde ~8 h
+  las tres redes la superan y la brecha crece: 0.651 contra 0.538 a 24 h y 0.407 contra 0.150 a 48 h.
+- **Las tres redes son casi indistinguibles** en el agregado (NSE mediano entre 0.625 y 0.629). La
+  diferencia está en las primeras horas: sin MRS la red llega a 0.983 a 1 h, porque recibe el caudal
+  observado. DMEL solo ve sus componentes, y justo las últimas horas de cada componente son las menos
+  estables (efecto de borde de la descomposición por ventana).
+- Validación y test cuentan la misma historia (NSE mediano de validación: 0.638 DMEL, 0.641 asignación
+  invertida, 0.655 sin MRS, 0.525 persistencia), así que la selección por validación generaliza al
+  periodo de test.
 
 ### 7.3 Ablaciones
 
@@ -297,10 +314,24 @@ Interpretación pendiente: se completa con los resultados finales del entrenamie
 
 ![Distribución acumulada del NSE por cuenca (test).](results/figures/nse_cdf.png)
 
-::: {.callout-note}
-Interpretación pendiente: efecto del MRS (DMEL vs sin MRS) y de la asignación de frecuencias (DMEL vs
-asignación invertida).
-:::
+- **DMEL vs persistencia**: mejora el NSE en 343 de 508 cuencas (mediana de +0.082, p = 6.2e-19).
+- **Ablación 1, asignación invertida**: diferencia de −0.005 en la mediana, DMEL gana en 238 de 508
+  cuencas, **p = 0.087: no significativa**. Da igual qué red recibe la alta frecuencia y cuál la baja. El
+  paper (Sec. 5.2) sí encontraba una ventaja clara de su asignación.
+- **Ablación 2, sin MRS**: la misma arquitectura con el caudal crudo es **levemente mejor** que DMEL
+  (−0.009 en la mediana, DMEL gana solo en 209 de 508 cuencas, p = 2.6e-05). Además converge antes (mejor
+  época 5 contra 11) y llega a una pérdida de validación menor (0.382 contra 0.399).
+
+**¿Por qué el MRS no ayuda aquí si en el paper sí?**
+
+1. CEEMDAN es una transformación determinista de la misma historia: no agrega información que la red no
+   pueda extraer del caudal. Además, descomponer por ventana degrada justo las horas más recientes.
+2. La descomposición de la serie completa del paper filtra información del futuro. En nuestro estudio de
+   fuga (sección 3.1), los componentes lentos, que son la entrada del LSTM, cambian 4–6 veces más que el
+   control al incluir el futuro (residuo: 0.179 contra 0.031; IMF5: 0.120 contra 0.021). Una parte de la
+   mejora reportada en el paper probablemente viene de ahí.
+3. El paper es univariado y usa solo 7 días de entrada, donde la descomposición actúa como ingeniería de
+   variables. Aquí las redes también reciben la lluvia y otras 10 variables meteorológicas.
 
 ## 8. Análisis de errores
 
@@ -322,11 +353,49 @@ asignación invertida).
 
 ![Observado frente a pronosticado a 24 h.](results/figures/scatter_24h.png)
 
-::: {.callout-note}
-Interpretación pendiente: principales errores y en qué cuencas y regímenes falla el modelo.
-:::
+**Principales errores**
 
-## 9. Limitaciones
+- **Crecidas que empiezan después del pronóstico.** Las mayores subidas de test parten de un caudal
+  casi nulo (cuencas 0, 139 y 275) y ningún modelo las anticipa. La lluvia que las provoca todavía no cae
+  en la historia, y las variables meteorológicas futuras (`y_aux`) no están disponibles en inferencia.
+  Cuando la subida ya empezó (cuenca 363), los modelos reaccionan: DMEL es el que más se acerca al pico
+  (≈1.15 contra 2.2 mm/h observados), pero baja demasiado lento en la recesión.
+- **Picos subestimados.** En las ventanas de crecida, todos subestiman el pico: EP mediano de −32 %
+  (DMEL), −39 % (asignación invertida), −31 % (sin MRS) y −49 % (persistencia). El desfase mediano del
+  pico es de 8 h para las redes y 19 h para la persistencia.
+- **Las ramas no se reparten las frecuencias.** Las dos salidas se compensan con desplazamientos casi
+  constantes (por ejemplo, +0.4 y −0.3 mm/h en la cuenca 139). En la crecida de la cuenca 363 la
+  respuesta la lleva el **LSTM**, que también recibe la lluvia, y no el Informer. Al entrenar sobre la
+  suma, la división en aportes de alta y baja frecuencia no es identificable, así que la interpretación
+  del paper ("el Informer captura los cambios bruscos") no se sostiene aquí.
+- **Caudales bajos.** En el tercio más bajo de cada cuenca, la persistencia tiene un error relativo de
+  10 % y las redes de 44–60 %. Las recesiones lentas se predicen casi perfecto copiando el último valor,
+  mientras que las redes agregan ruido relativo cuando la magnitud es mínima (la pérdida NSE\* pesa por
+  la variabilidad de la cuenca, no por el nivel del caudal). DMEL es la mejor red en este régimen (44 %
+  contra 60 % sin MRS): el componente suave de baja frecuencia sí ayuda en las recesiones. En caudales
+  altos las redes superan a la persistencia (31–33 % contra 39 %).
+- **Cuencas casi secas.** Las cuencas en que DMEL tiene NSE muy negativo se concentran en caudales medios
+  por debajo de 0.01 mm/h. Ahí la varianza del periodo de test es mínima y errores absolutos pequeños
+  dan un NSE muy negativo.
+
+## 9. Conclusiones
+
+1. Implementamos DMEL desde cero: CEEMDAN mejorado en numba, sample entropy, la regla MRS, el Informer
+   con atención ProbSparse, el LSTM y el ensamble dual. Lo adaptamos a pronóstico horario multi-cuenca
+   sin información del futuro.
+2. DMEL supera claramente a la persistencia a partir de ~8 h (NSE mediano de 0.41 contra 0.15 a 48 h;
+   mejor en 343 de 508 cuencas), pero no en las primeras horas.
+3. Sin la fuga de información, **ninguno de los dos componentes centrales aporta**: invertir la
+   asignación de frecuencias no cambia el resultado (p = 0.087) y quitar el MRS lo mejora levemente
+   (p = 2.6e-05).
+4. La descomposición de la serie completa del paper hace que los componentes lentos cambien 4–6 veces más
+   que el ruido propio de CEEMDAN al incluir el futuro. Es una explicación probable de parte de las
+   ganancias reportadas.
+5. Los errores dominantes son las crecidas provocadas por lluvia futura y la subestimación de los picos
+   (~30–40 %). Las mejoras naturales son usar precipitación pronosticada, si existiera en operación, y
+   darle a DMEL también el caudal crudo para recuperar las primeras horas.
+
+## 10. Limitaciones
 
 - **Efecto de borde**: sin el futuro, los componentes de las últimas horas son los menos estables, y son
   justo los más importantes para pronosticar.
@@ -337,8 +406,11 @@ Interpretación pendiente: principales errores y en qué cuencas y regímenes fa
 - **Una semilla** por modelo: la significancia se mide entre cuencas, no entre corridas.
 - **Sin covariables futuras**: la lluvia de las próximas 48 h (`y_aux`) no está disponible en inferencia,
   lo que limita el pronóstico del inicio de crecidas que aún no empezaron.
+- **Caudales bajos**: en las recesiones el error relativo de las redes es mucho mayor que el de la
+  persistencia.
+- **Primeras horas**: DMEL no ve el caudal crudo y pierde contra la persistencia hasta ~6 h.
 
-## 10. Reproducibilidad
+## 11. Reproducibilidad
 
 ```bash
 uv sync --frozen && uv run pytest                   # 19 tests
@@ -351,7 +423,7 @@ bash hpc/pull.sh && quarto render REPORT.qmd
 Los hiperparámetros, las semillas y el entorno están detallados en el `README.md`. Las predicciones de
 test están en `predictions/<corrida>_test.csv` con el formato `Id, q_01…q_48` (mm/h).
 
-## 11. Uso de IA generativa
+## 12. Uso de IA generativa
 
 Este trabajo se desarrolló con asistencia de IA generativa (Claude, de Anthropic) para escribir y revisar
 código y documentación. El grupo revisó y validó las decisiones de implementación y los resultados.

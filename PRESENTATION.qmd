@@ -265,9 +265,11 @@ futuro. Nosotros descomponemos cada ventana solo con su historia.
 :::
 
 ::: {.notes}
-(≈1 min) Figura clave. EMD no es causal. Al agregar las 48 h futuras, los componentes lentos cambian
-mucho más que al cambiar solo el ruido. En test no existe el futuro, así que el protocolo del paper es
-imposible aquí; además explica por qué esperamos ganancias menores que las reportadas.
+(≈1 min) Figura clave. EMD no es causal. Al agregar las 48 h futuras, los componentes lentos cambian 4–6
+veces más que al cambiar solo el ruido (residuo: 0.179 contra 0.031 desviaciones del caudal). En el
+ejemplo, el residuo calculado con el futuro sube a 0.38 mm/h mientras el caudal sigue en ~0. En test no
+existe el futuro, así que el protocolo del paper es imposible aquí; además explica por qué esperamos
+ganancias menores que las reportadas.
 :::
 
 ## Nuestro CEEMDAN y MRS
@@ -345,20 +347,19 @@ frecuencia, LSTM para baja y suma de las ramas.
 
 ## Cómo entrenamos
 
-::: {.columns}
-::: {.column width="42%"}
-- Adam, lr $3\times10^{-4}$ con warmup.
-- ReduceLROnPlateau (×0.5).
-- Batch 256 · 993 pasos por época.
-- Early stopping: paciencia 5.
-- RTX A6000 · ~2 min por época.
-- 3.68 M parámetros.
+::: {.columns .compact}
+::: {.column width="50%"}
+- Adam, lr $3\times10^{-4}$ con warmup; ReduceLROnPlateau (×0.5).
+- Batch 256 · 993 pasos por época · 3.68 M parámetros.
 :::
 
-::: {.column width="58%"}
-![](results/figures/training_curves.png){fig-alt="Curvas de pérdida, NSE de validación y learning rate."}
+::: {.column width="50%"}
+- Early stopping con paciencia 5: DMEL paró en la época 16 (mejor 11).
+- RTX A6000 · ~2 min por época · 1 h 18 min en total.
 :::
 :::
+
+![](results/figures/training_curves.png){.r-stretch fig-alt="Curvas de pérdida, NSE de validación y learning rate."}
 
 ::: {.notes}
 (≈45 s) Una época nuestra tiene ~30 veces más actualizaciones que una del paper. La selección de la mejor
@@ -388,20 +389,61 @@ Las tres redes tienen la misma arquitectura y ~3.7 M parámetros: solo cambia la
 
 ## Resultados en test
 
+::: {.columns}
+::: {.column width="25%"}
+<div class="metric">
+<strong>0.629</strong>
+NSE mediano DMEL
+</div>
+:::
+::: {.column width="25%"}
+<div class="metric">
+<strong>0.492</strong>
+persistencia
+</div>
+:::
+::: {.column width="25%"}
+<div class="metric">
+<strong>343/508</strong>
+cuencas mejoran
+</div>
+:::
+::: {.column width="25%"}
+<div class="metric">
+<strong>0.41 vs 0.15</strong>
+NSE a 48 h
+</div>
+:::
+:::
+
 ::: {.small}
-{{< include results/tables/metrics_test.md >}}
+| Test | Persistencia | **DMEL** | Asignación invertida | Sin MRS |
+|---|---:|---:|---:|---:|
+| NSE mediano | 0.492 | **0.629** | 0.629 | 0.625 |
+| KGE mediano | 0.626 | 0.673 | 0.677 | 0.681 |
+| RMSE (mm/h) | 0.119 | 0.101 | 0.101 | 0.100 |
+| NSE 1 h / 24 h / 48 h | 0.998 / 0.538 / 0.150 | 0.957 / 0.651 / 0.407 | 0.953 / 0.675 / 0.412 | 0.983 / 0.668 / 0.400 |
+| Cuencas con NSE < 0 | 74 | 39 | 24 | 26 |
 :::
 
 ::: {.notes}
-(≈1 min) Pendiente: comentar la fila de NSE mediano y los horizontes 24 y 48 h.
+(≈1 min) DMEL supera claramente a la persistencia en el agregado (Wilcoxon p = 6e-19). Pero las tres redes
+son casi iguales entre sí. Validación da lo mismo (0.638 / 0.641 / 0.655 / 0.525), así que la selección
+por validación generaliza a test.
 :::
 
 ## ¿Cómo cae el desempeño con el horizonte?
 
 ![](results/figures/nse_by_lead.png){.r-stretch fig-alt="NSE mediano por horizonte de pronóstico."}
 
+::: {.key-message}
+Hasta ~6 h gana copiar el último valor; desde ~8 h las redes ganan y a 48 h duplican con creces el NSE de
+la persistencia (0.41 contra 0.15).
+:::
+
 ::: {.notes}
-(≈1 min) Pendiente: horizonte a partir del cual los modelos superan a la persistencia.
+(≈1 min) En las primeras horas la red sin MRS es la mejor (0.983 a 1 h) porque ve el caudal crudo. DMEL
+solo ve componentes, cuyas últimas horas son las menos estables por el efecto de borde.
 :::
 
 ## Las ablaciones
@@ -410,26 +452,58 @@ Las tres redes tienen la misma arquitectura y ~3.7 M parámetros: solo cambia la
 {{< include results/tables/wilcoxon_test.md >}}
 :::
 
-![](results/figures/nse_boxes.png){height="360" fig-alt="NSE de las cuencas por horizonte y modelo."}
+::: {.key-message}
+Sin fuga de información, ninguno de los dos componentes centrales aporta: invertir la asignación no
+cambia nada (p = 0.087) y quitar el MRS mejora levemente (p = 2.6e-05).
+:::
 
 ::: {.notes}
-(≈1 min) Pendiente: efecto del MRS y de la asignación de frecuencias, con su significancia.
+(≈1 min) Wilcoxon pareado sobre el NSE de las 508 cuencas. La red sin MRS además converge antes (mejor
+época 5 contra 11) y llega a menor pérdida de validación (0.382 contra 0.399).
+:::
+
+## ¿Por qué el MRS no ayuda aquí?
+
+1. **No agrega información**: CEEMDAN es una transformación determinista de la misma historia, y por
+   ventana degrada justo las horas más recientes.
+2. **El paper se beneficia de la fuga**: con el futuro incluido, los componentes lentos cambian 4–6× más
+   que el ruido propio de CEEMDAN (residuo: 0.179 contra 0.031).
+3. **Otro problema**: el paper es univariado con 7 días de entrada; aquí las redes también ven la lluvia.
+
+::: {.key-message}
+Parte de la mejora reportada por el paper probablemente viene de descomponer la serie completa.
+:::
+
+::: {.notes}
+(≈1 min) Volver a la figura de fuga: el residuo calculado con el futuro sube antes de la crecida.
 :::
 
 ## Las crecidas
 
 ![](results/figures/events.png){.r-stretch fig-alt="Hidrogramas de las mayores crecidas de test."}
 
+::: {.compact}
+Las mayores crecidas parten de caudal ~0: la lluvia que las provoca aún no cae y ningún modelo las
+anticipa. Si la subida ya empezó (cuenca 363), DMEL es el que más se acerca al pico (≈1.15 contra 2.2 mm/h).
+:::
+
 ::: {.notes}
-(≈45 s) Pendiente: comentar pico, subida y desfase.
+(≈45 s) Las variables meteorológicas futuras (y_aux) no están disponibles en inferencia; con lluvia
+pronosticada estas crecidas serían predecibles.
 :::
 
 ## ¿Qué aporta cada rama?
 
 ![](results/figures/branches.png){.r-stretch fig-alt="Aporte del Informer y del LSTM en las crecidas."}
 
+::: {.compact}
+Las ramas se compensan con desplazamientos casi constantes (+0.4 / −0.3). La crecida de la cuenca 363 la
+explica el **LSTM**, que también recibe la lluvia, no el Informer.
+:::
+
 ::: {.notes}
-(≈45 s) Pendiente: qué parte del hidrograma explica cada rama.
+(≈45 s) Al entrenar sobre la suma, la división en aportes de alta y baja frecuencia no es identificable.
+La interpretación del paper ("el Informer captura los cambios bruscos") no se sostiene aquí.
 :::
 
 ## ¿Dónde falla?
@@ -444,13 +518,20 @@ Las tres redes tienen la misma arquitectura y ~3.7 M parámetros: solo cambia la
 :::
 :::
 
+::: {.compact}
+- **Caudales bajos**: la persistencia tiene 10 % de error relativo y las redes 44–60 %; DMEL es la mejor red.
+- **Picos**: todos los subestiman (EP mediano de −32 % en DMEL); el desfase baja de 19 h a 8 h.
+:::
+
 ::: {.notes}
-(≈1 min) Pendiente: regímenes y cuencas con más error.
+(≈1 min) Las cuencas con NSE muy negativo son casi secas (caudal medio < 0.01 mm/h): con tan poca
+varianza, errores absolutos pequeños dan un NSE muy negativo.
 :::
 
 ## Limitaciones
 
 - Sin el futuro, los componentes de las últimas horas son los menos estables (efecto de borde).
+- DMEL no ve el caudal crudo: pierde contra la persistencia hasta ~6 h.
 - Una sola agrupación MRS para las 508 cuencas.
 - Las ramas no se supervisan por separado: su aporte es una interpretación.
 - Una semilla por modelo; la significancia se mide entre cuencas.
@@ -460,8 +541,13 @@ Las tres redes tienen la misma arquitectura y ~3.7 M parámetros: solo cambia la
 
 1. Implementamos DMEL desde cero: CEEMDAN y sample entropy propios, Informer con ProbSparse y LSTM.
 2. Descomponer la serie completa, como el paper, filtra información del futuro; lo evitamos por ventana.
-3. La regla MRS automática reproduce la agrupación del paper y da IMF1–IMF5 → Informer, IMF6 + residuo → LSTM.
-4. Pendiente: resultado principal y de las ablaciones.
+3. DMEL supera a la persistencia desde ~8 h (0.41 contra 0.15 de NSE a 48 h; 343 de 508 cuencas).
+4. Sin fuga, ni el MRS ni la asignación de frecuencias mejoran a la misma arquitectura con el caudal crudo.
+
+::: {.key-message}
+La idea de separar por frecuencias es elegante, pero en un pronóstico honesto (solo con el pasado) su
+ventaja desaparece; lo que más ayudaría es información del futuro que no tenemos: la lluvia pronosticada.
+:::
 
 ## Apéndice: configuración completa {.smaller visibility="uncounted"}
 
@@ -474,6 +560,24 @@ Las tres redes tienen la misma arquitectura y ~3.7 M parámetros: solo cambia la
 | Informer | d_model 256, 8 cabezas, 2 enc + 1 dec, d_ff 1024, c = 5, dropout 0.1 |
 | LSTM | 2 × 256, dropout 0.1, Linear(256 → 48) |
 | Entrenamiento | Adam 3e-4, warmup 500, batch 256, máx. 30 épocas, paciencia 5, clip 1.0, TF32 |
+
+## Apéndice: todas las métricas de test {.smaller visibility="uncounted"}
+
+{{< include results/tables/metrics_test.md >}}
+
+## Apéndice: entrenamiento {visibility="uncounted"}
+
+::: {.small}
+{{< include results/tables/training.md >}}
+:::
+
+## Apéndice: NSE de las cuencas por horizonte {visibility="uncounted"}
+
+![](results/figures/nse_boxes.png){.r-stretch fig-alt="NSE de las cuencas por horizonte y modelo."}
+
+## Apéndice: desempeño vs magnitud del caudal {visibility="uncounted"}
+
+![](results/figures/nse_vs_flow.png){.r-stretch fig-alt="NSE por cuenca frente a su caudal medio."}
 
 ## Apéndice: MRS en números {visibility="uncounted"}
 

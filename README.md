@@ -177,7 +177,29 @@ Para cambiar un valor sin tocar el código se pasa el argumento (por ejemplo
 Las tablas de `results/tables/*.md` y las figuras de `results/figures/*.png` se regeneran con
 `dmel-evaluate`; el reporte (`REPORT.qmd`) y la presentación (`PRESENTATION.qmd`) las incluyen.
 
-*Pendiente: se completa al terminar los entrenamientos en KHIPU.*
+Test (27 983 ventanas, 508 cuencas; NSE y KGE son medianas entre cuencas):
+
+| | Persistencia | **DMEL** | Asignación invertida | Sin MRS |
+|---|---:|---:|---:|---:|
+| NSE mediano | 0.492 | **0.629** | 0.629 | 0.625 |
+| KGE mediano | 0.626 | 0.673 | 0.677 | 0.681 |
+| RMSE (mm/h) | 0.119 | 0.101 | 0.101 | 0.100 |
+| NSE a 1 h / 24 h / 48 h | 0.998 / 0.538 / 0.150 | 0.957 / 0.651 / 0.407 | 0.953 / 0.675 / 0.412 | 0.983 / 0.668 / 0.400 |
+| Cuencas con NSE < 0 | 74 | 39 | 24 | 26 |
+| Mejor época / épocas entrenadas | — | 11 / 16 | 5 / 10 | 5 / 10 |
+
+- **DMEL supera a la persistencia** en 343 de 508 cuencas (Wilcoxon p = 6.2e-19), sobre todo desde ~8 h;
+  en las primeras horas copiar el último valor es mejor.
+- **Ablación 1 (asignación invertida)**: sin diferencia significativa (p = 0.087).
+- **Ablación 2 (sin MRS)**: la misma arquitectura con el caudal crudo es levemente mejor (p = 2.6e-05).
+- Descomponer la serie completa, como el paper, hace que los componentes lentos cambien 4–6× más que el
+  ruido propio de CEEMDAN (`results/figures/leakage.png`): es una explicación probable de parte de las
+  ganancias reportadas en el paper.
+- Errores principales: crecidas provocadas por lluvia que aún no cae (no hay meteorología futura en
+  inferencia), picos subestimados (~30–40 %) y caudales bajos, donde la persistencia es mucho mejor.
+
+El análisis completo está en `REPORT.qmd` / `REPORT.html`; las predicciones de test, en
+`predictions/dmel_s0_test.csv` (y una por cada ablación).
 
 ## Limitaciones
 
