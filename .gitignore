@@ -8,3 +8,15 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Datos, artefactos y resultados pesados
+*.h5
+test_targets.csv
+*.pdf
+data/
+artifacts/
+runs/
+predictions/
+logs/
+smoke/
+.claude/worktrees/
