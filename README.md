@@ -62,6 +62,7 @@ Hiperparámetros como en la Tabla 1 del paper: Informer d_model 256, 8 cabezas, 
 | **`dmel`** | Informer(RIMFs HF) | LSTM(RIMFs LF) | Propuesta del paper |
 | `dmel_swap` | LSTM(RIMFs HF) | Informer(RIMFs LF) | Ablación 1: ¿importa asignar cada frecuencia a su modelo? (paper, Sec. 5.2) |
 | `hybrid_raw` | Informer(caudal crudo) | LSTM(caudal crudo) | Ablación 2: ¿aporta el MRS? Misma arquitectura sin descomposición (modelo base entrenado) |
+| `dmel_q` | Informer(RIMFs HF) | LSTM(RIMFs LF + caudal crudo) | Variante propia: ¿recupera DMEL las primeras horas si también ve el caudal observado? |
 
 ## Cómo ejecutar
 
@@ -90,8 +91,11 @@ bash hpc/push.sh                                    # sube el commit actual y ha
 ssh khipu
 cd runoff_deep_learning
 D=$(sbatch --parsable hpc/decompose.slurm)          # CEEMDAN + MRS en CPU (~25 min con 24 CPUs)
-sbatch --dependency=afterok:$D hpc/train.slurm      # dmel, dmel_swap, hybrid_raw en la A100 + evaluación
+T=$(MODELS="dmel dmel_q" sbatch --parsable --dependency=afterok:$D hpc/train.slurm)
+MODELS="dmel_swap hybrid_raw" sbatch --dependency=afterany:$T hpc/train.slurm   # + evaluación final
 ```
+
+Con 100 épocas cada modelo toma ~3.4 h en una RTX A6000, así que van dos modelos por job (límite de 8 h).
 
 `train.slurm` pide la A100 completa (`gpu:a100:1`). Si está ocupada, se puede usar un slice MIG de la
 misma A100 sin editar el script: `sbatch --gres=gpu:a100_3g.20gb:1 ...` (20 GB alcanzan con batch 256).
@@ -159,7 +163,7 @@ Cada corrida guarda sus argumentos, el número de parámetros y las estadística
 | Modelo | Parámetros | 3.68 M (dmel) | log de entrenamiento |
 | Optimización | Optimizador, lr | Adam, 3e-4 con warmup lineal de 500 pasos | `--lr`, `--warmup`, `src/dmel/train.py` |
 | | Batch | 256 (993 pasos por época) | `--batch` |
-| | Épocas | máximo 30, early stopping con paciencia 5 sobre la pérdida de validación | `--epochs`, `--patience` |
+| | Épocas | 100 (paper: 100), sin early stopping; se guarda la época con menor pérdida de validación | `--epochs`; `--patience` opcional |
 | | Scheduler | ReduceLROnPlateau (factor 0.5, paciencia 2) | `main()`, `src/dmel/train.py` |
 | | Gradiente | clip de norma 1.0; TF32 activado | `--clip` |
 | | Pérdida | NSE\* = MSE(ŷ/s_b, y/s_b) | `main()` |
@@ -176,6 +180,10 @@ Para cambiar un valor sin tocar el código se pasa el argumento (por ejemplo
 
 Las tablas de `results/tables/*.md` y las figuras de `results/figures/*.png` se regeneran con
 `dmel-evaluate`; el reporte (`REPORT.qmd`) y la presentación (`PRESENTATION.qmd`) las incluyen.
+
+> **Nota:** estos números son de la primera ronda, con early stopping (paciencia 5, máximo 30 épocas).
+> Se están reentrenando todos los modelos, más la variante `dmel_q`, con 100 épocas completas. Las
+> métricas de esta ronda quedan archivadas en `results/earlystop/`.
 
 Test (27 983 ventanas, 508 cuencas; NSE y KGE son medianas entre cuencas):
 
