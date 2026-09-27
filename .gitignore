@@ -20,3 +20,5 @@ predictions/
 logs/
 smoke/
 .claude/worktrees/
+REVISION
+.quarto/

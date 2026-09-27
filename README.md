@@ -33,6 +33,7 @@ historia 336 h ──► caudal ──► CEEMDAN (por ventana) ──► SE + v
 | `models.py` | LSTM, ensamble dual y variantes de la ablación |
 | `data.py` | Lectura de los `.h5`, escalado por cuenca, construcción y normalización de entradas |
 | `metrics.py` | NSE, KGE, RMSE, MAE por cuenca y por horizonte; error de pico |
+| `plots.py` | Figuras del reporte y la presentación |
 | `decompose.py`, `build_mrs.py`, `train.py`, `evaluate.py` | CLIs del flujo completo |
 
 ### Adaptaciones al dataset (diferencias con el paper)
@@ -95,14 +96,88 @@ sbatch --dependency=afterok:$D hpc/train.slurm      # dmel, dmel_swap, hybrid_ra
 `train.slurm` pide la A100 completa (`gpu:a100:1`). Si está ocupada, se puede usar un slice MIG de la
 misma A100 sin editar el script: `sbatch --gres=gpu:a100_3g.20gb:1 ...` (20 GB alcanzan con batch 256).
 
+Traer los resultados y generar el reporte y la presentación ([Quarto](https://quarto.org) ≥ 1.8):
+
+```bash
+bash hpc/pull.sh                                    # results/, predictions/, historias y logs
+quarto render REPORT.qmd                            # REPORT.html (autocontenido)
+quarto render PRESENTATION.qmd                      # PRESENTATION.html (revealjs)
+```
+
 Salidas: `artifacts/` (componentes, `mrs.json`, tabla y figura de entropías), `runs/<corrida>/`
 (checkpoint, historia de entrenamiento, predicciones), `predictions/<corrida>_test.csv` (formato
 `Id, q_01..q_48` en mm/h) y `results/` (tablas y figuras). `test_targets.csv` solo lo lee
 `evaluate.py` para el reporte final; la selección de modelos usa únicamente la validación.
 
+## Configuración y reproducibilidad
+
+Todas las corridas usan los valores por defecto de los CLIs (los scripts de `hpc/` no los sobrescriben).
+Cada corrida guarda sus argumentos, el número de parámetros y las estadísticas de normalización en
+`runs/<corrida>/config.json`.
+
+### Entorno
+
+| Elemento | Valor |
+|---|---|
+| Python | 3.12 (`.python-version`); dependencias fijadas en `uv.lock` (`uv sync --frozen`) |
+| Librerías principales | torch 2.11.0+cu126 (índice PyTorch cu126), numba 0.67, numpy 2.4, scipy 1.18, h5py 3.16 |
+| CEEMDAN + MRS | KHIPU, partición `standard`, 24 CPUs (job 53335: 38 min) |
+| Entrenamiento | KHIPU, partición `gpu`, NVIDIA RTX A6000 48 GB (job 53336). La A100 estaba reservada por otros usuarios; el mismo script corre en `gpu:a100:1` o en el slice `a100_3g.20gb` |
+| Código ejecutado | el commit queda en `REVISION` (KHIPU) y en la primera línea de cada log de Slurm (`logs/*.out`) |
+
+### Semillas
+
+| Qué | Semilla | Dónde |
+|---|---|---|
+| Pesos, dropout y orden de los batches | `--seed 0` | `src/dmel/train.py` |
+| Banco de 100 realizaciones de ruido de CEEMDAN (el mismo para train y test) | 0 | `noise_bank()` en `src/dmel/ceemdan.py` |
+| Muestra de 8000 ventanas de train para el MRS | 0 | `--seed` en `src/dmel/build_mrs.py` |
+| Muestra de 20 000 ventanas para la normalización | 0 | `fit_norm()` en `src/dmel/data.py` |
+| Muestreo de claves de ProbSparse al predecir | 0 | `predict()` en `src/dmel/train.py` |
+
+### Hiperparámetros
+
+| Etapa | Parámetro | Valor | Dónde |
+|---|---|---|---|
+| CEEMDAN | IMFs máximos + residuo | 6 + 1 | `--imfs`, `src/dmel/decompose.py` |
+| | Realizaciones de ruido | 100 (paper: 100) | `--trials` |
+| | Amplitud relativa del ruido ε | 0.2 (paper: 0.2) | `--eps` |
+| | Iteraciones de sifting por IMF | 10 (fijas) | `--sifts` |
+| | Envolventes | spline cúbica natural; bordes por extrapolación lineal de los 2 extremos más cercanos | `envelope()`, `src/dmel/ceemdan.py` |
+| Sample entropy | m, r | 2, 0.2·std (paper: igual) | `sample_entropy()`, `src/dmel/mrs.py` |
+| MRS | Ventanas de train | 8000 | `--windows`, `src/dmel/build_mrs.py` |
+| | Umbral de voto / banda τ | 0.5 / 0.1 | `propose_groups()` y `--tau` |
+| | Resultado | HF = IMF1…IMF5 (5 RIMFs); LF = IMF6 + residuo (1 RIMF) | `artifacts/mrs.json` |
+| Entradas | Escala por cuenca | s_b = σ_b + ε, ε = 0.01 mm/h (estadísticas de train) | `EPS`, `basin_scales()`, `src/dmel/data.py` |
+| | Canales por rama | hf: 5 RIMFs + 11 meteorológicas + 2 estáticos = 18; lf: 1 + 11 + 2 = 14; raw: 1 + 11 + 2 = 14 | `make_inputs()` |
+| | Normalización | z-score por canal con 20 000 ventanas de train | `fit_norm()` |
+| Informer | d_model, cabezas, d_ff | 256, 8, 1024 (paper: igual) | `Informer.__init__`, `src/dmel/informer.py` |
+| | Capas encoder / decoder | 2 / 1, con 1 distilling (336 → 168) | |
+| | ProbSparse | c = 5 → u = 30 queries en el encoder, 25 en el decoder | `prob_attention()` |
+| | Decoder | label_len 48 + 48 ceros; activación GELU; dropout 0.1 | |
+| LSTM | Capas, unidades, dropout | 2, 256, 0.1 (paper: 2, 256); cabeza Linear(256 → 48) | `LSTMNet`, `src/dmel/models.py` |
+| Modelo | Parámetros | 3.68 M (dmel) | log de entrenamiento |
+| Optimización | Optimizador, lr | Adam, 3e-4 con warmup lineal de 500 pasos | `--lr`, `--warmup`, `src/dmel/train.py` |
+| | Batch | 256 (993 pasos por época) | `--batch` |
+| | Épocas | máximo 30, early stopping con paciencia 5 sobre la pérdida de validación | `--epochs`, `--patience` |
+| | Scheduler | ReduceLROnPlateau (factor 0.5, paciencia 2) | `main()`, `src/dmel/train.py` |
+| | Gradiente | clip de norma 1.0; TF32 activado | `--clip` |
+| | Pérdida | NSE\* = MSE(ŷ/s_b, y/s_b) | `main()` |
+| Predicción | Postproceso | ŷ·s_b recortado en 0 mm/h | `main()` |
+| Evaluación | Métricas | NSE y KGE por cuenca (mediana entre cuencas), RMSE y MAE agregados, NSE por horizonte | `src/dmel/metrics.py` |
+| | Crecidas | ventanas cuyo pico observado supera el cuantil 0.95 de su cuenca | `peak_errors()` |
+| | Regímenes | terciles del caudal observado de cada cuenca | `regimes_table()`, `src/dmel/evaluate.py` |
+| | Significancia | Wilcoxon pareado sobre el NSE de las cuencas | `wilcoxon_table()` |
+
+Para cambiar un valor sin tocar el código se pasa el argumento (por ejemplo
+`dmel-train --model dmel --epochs 100`).
+
 ## Resultados
 
-*Pendiente: se completa con `results/summary.md` al terminar los entrenamientos en KHIPU.*
+Las tablas de `results/tables/*.md` y las figuras de `results/figures/*.png` se regeneran con
+`dmel-evaluate`; el reporte (`REPORT.qmd`) y la presentación (`PRESENTATION.qmd`) las incluyen.
+
+*Pendiente: se completa al terminar los entrenamientos en KHIPU.*
 
 ## Limitaciones
 
