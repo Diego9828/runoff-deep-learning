@@ -1,0 +1,366 @@
+---
+title: "DMEL para pronóstico horario de caudal"
+subtitle: "Reconocimiento modal (CEEMDAN + sample entropy) y ensamble dual Informer–LSTM · Laboratorio 2"
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    smooth-scroll: true
+    fig-align: center
+---
+
+## 1. Problema y datos
+
+Se pronostica el **caudal de las próximas 48 horas** de una cuenca a partir de las **336 horas previas**
+(14 días) de 12 variables: el caudal observado y 11 variables meteorológicas. El caudal está expresado en
+mm/h (normalizado por el área de la cuenca) y las predicciones se entregan en la misma unidad.
+
+| Partición | Ventanas | Uso |
+|---|---:|---|
+| train (`split = 0`) | 254 000 | entrenamiento, normalización y agrupación MRS |
+| validación (`split = 1`) | 18 142 | selección de la mejor época (early stopping) |
+| test | 27 983 | predicciones finales; `test_targets.csv` solo se usa en este reporte |
+
+- **508 cuencas** anónimas, todas presentes en las tres particiones: la división es temporal, dentro de cada cuenca.
+- Las ventanas de train se solapan mucho entre sí; las de validación y test casi no se solapan con train.
+- No hay fechas: no se puede construir el embedding temporal del Informer.
+- El caudal es muy asimétrico: mediana de 0.02 mm/h y máximos de ~15 mm/h. La desviación estándar por
+  cuenca va de ~0.001 a 0.55 mm/h (tres órdenes de magnitud) y ~2 % de las ventanas no tiene caudal.
+
+**Referencia ingenua (persistencia).** Repetir el último caudal observado da, en validación, un NSE
+mediano por cuenca de 0.998 a 1 h, 0.957 a 6 h, 0.841 a 12 h, 0.581 a 24 h y 0.223 a 48 h: el reto
+está en los horizontes largos.
+
+## 2. El método del paper: DMEL
+
+Wang et al. (2026) proponen **DMEL** (*Dual-Modal Ensemble Learning*) para pronóstico diario de caudal en
+varios pasos. Tiene dos componentes: una estrategia de reconocimiento modal (MRS) y un ensamble dual.
+
+### 2.1 CEEMDAN
+
+La serie se descompone en modos intrínsecos (IMF) con CEEMDAN mejorado (Colominas et al., 2014). Sea
+$E_k(\cdot)$ el operador que devuelve el $k$-ésimo modo EMD y $M(\cdot)$ la media local (la señal menos su
+primer IMF). Con $I$ realizaciones de ruido blanco $w^{(i)}$:
+
+$$
+r_1=\big\langle M\big(x+\beta_0E_1(w^{(i)})\big)\big\rangle_i,\qquad \mathrm{IMF}_1=x-r_1,
+$$
+
+$$
+r_k=\big\langle M\big(r_{k-1}+\beta_{k-1}E_k(w^{(i)})\big)\big\rangle_i,\qquad \mathrm{IMF}_k=r_{k-1}-r_k,
+$$
+
+con $\beta_0=\varepsilon\,\sigma(x)/\sigma(E_1(w^{(i)}))$ y $\beta_k=\varepsilon\,\sigma(r_k)$. La señal se
+recupera exactamente: $x=\sum_k \mathrm{IMF}_k+r_K$. El paper usa $\varepsilon=0.2$ e $I=100$.
+
+### 2.2 Sample entropy
+
+La complejidad de cada componente se mide con *sample entropy* (Richman y Moorman, 2000):
+
+$$
+\mathrm{SampEn}(m,r,L)=-\ln\frac{A}{B},
+$$
+
+donde $B$ y $A$ cuentan los pares de plantillas de longitud $m$ y $m+1$ cuya distancia de Chebyshev es
+menor que $r$ (sin contar cada plantilla consigo misma). El paper usa $m=2$ y $r=0.2\,\sigma$.
+
+### 2.3 Estrategia de reconocimiento modal (MRS)
+
+1. Descomponer la serie con CEEMDAN.
+2. Calcular la SE de cada IMF y de la serie original.
+3. Reagrupar (sumar) los IMF de entropía parecida en componentes reconstruidos (RIMF).
+4. Clasificar cada RIMF: **alta frecuencia (HF)** si su SE supera la de la serie original, **baja
+   frecuencia (LF)** si no.
+
+En el paper la agrupación es visual. Por ejemplo, en Shuangpai IMF1…IMF5 quedan como RIMF individuales de
+alta frecuencia e IMF6+IMF7+IMF8+IMF9 forman el único RIMF de baja frecuencia.
+
+### 2.4 Ensamble dual
+
+Cada tipo de componente va al modelo que mejor lo aprovecha y la predicción es la suma (Ec. 14):
+
+$$
+\hat{y}(t)=\hat{y}_{\mathrm{Informer}}\big(\mathrm{RIMF}_{\mathrm{HF}}(t)\big)+\hat{y}_{\mathrm{LSTM}}\big(\mathrm{RIMF}_{\mathrm{LF}}(t)\big).
+$$
+
+- **Informer** (Zhou et al., 2021) para lo irregular y de alta frecuencia: atención ProbSparse, distilling
+  entre capas y decoder generativo que emite todo el horizonte en una pasada.
+- **LSTM** para las tendencias suaves de baja frecuencia.
+- En la versión multivariable (Sec. 5.6), las covariables se concatenan a las entradas de ambas ramas.
+
+El paper compara contra Informer, Transformer, LSTM, RNN, TimesNet y PatchTST, y hace dos ablaciones:
+MRS frente a CEEMDAN sin reagrupar (Sec. 5.1) y la asignación invertida LSTM→HF, Informer→LF (Sec. 5.2).
+
+## 3. Adaptación al dataset
+
+### 3.1 Descomposición por ventana: sin información del futuro
+
+El paper descompone **la serie completa** y después la divide en train/validación/test. Como EMD no es
+causal (las envolventes usan extremos futuros), cada componente del pasado "ve" el futuro. Aquí cada
+ventana se descompone **solo con sus 336 h de historia**, igual que en test, donde no existe el futuro.
+
+![Cambio de los componentes en las últimas 48 h de historia cuando también se descompone el futuro (protocolo del paper), comparado con cambiar solo el ruido de CEEMDAN.](results/figures/leakage.png)
+
+{{< include results/tables/leakage_val.md >}}
+
+Los componentes lentos (IMF5, IMF6) son los que más cambian al agregar las 48 h futuras, mucho más que el
+control. Es la fuga de información que la descomposición por ventana evita, y también un motivo para
+esperar ganancias menores que las del paper.
+
+### 3.2 CEEMDAN y sample entropy implementados desde cero
+
+- `src/dmel/ceemdan.py` implementa el CEEMDAN mejorado en **numba**: sifting con 10 iteraciones fijas,
+  spline cúbica natural propia (algoritmo de Thomas) y un **banco fijo de 100 realizaciones de ruido** con
+  sus modos EMD, calculado una vez y reutilizado en todas las ventanas.
+- En los bordes, cada envolvente se extiende con la recta de los dos extremos más cercanos. No se refleja
+  la señal: en una rama ascendente el espejo inventaría un pico en $t=336$, la hora más importante.
+- Con $K=6$ IMFs + residuo (336 muestras soportan ~5–6 modos), las 300 125 ventanas se descomponen a
+  ~4.6 ms por ventana con 24 CPUs (el job de CEEMDAN + MRS tomó 38 min). La reconstrucción tiene un error
+  máximo de $10^{-6}$ mm/h.
+- `src/dmel/mrs.py` implementa sample entropy con plantillas vectorizadas en numpy.
+
+![CEEMDAN de una ventana de test. Rojo: RIMF de alta frecuencia (van al Informer); azul: baja frecuencia (van al LSTM).](results/figures/decomposition.png)
+
+### 3.3 MRS automático y global
+
+Un solo modelo para 508 cuencas necesita los mismos canales en todas las ventanas, así que la agrupación
+se decide una vez con 8000 ventanas de train y una regla reproducible:
+
+1. **Voto** de cada componente $k$: fracción de ventanas en que el componente existe y
+   $\mathrm{SE}(c_k)>\mathrm{SE}(q)$. Voto $>0.5$ → RIMF individual de alta frecuencia.
+2. El resto se suma por bandas de SE mediana ($\le 0.1$ y $>0.1$), igual que los grupos del paper.
+3. Cada suma se re-clasifica con el voto de su propia SE.
+
+Con los valores de la Tabla 2 del paper, esta regla reproduce exactamente la Tabla 3 en sus dos estaciones
+(`tests/test_mrs.py`).
+
+![Sample entropy mediana de cada componente y de la serie original.](results/figures/mrs_entropy.png)
+
+{{< include results/tables/mrs_components.md >}}
+
+{{< include results/tables/mrs_groups.md >}}
+
+El resultado replica el patrón de Shuangpai: cinco RIMF de alta frecuencia (IMF1…IMF5) para el Informer y
+uno de baja frecuencia (IMF6 + residuo) para el LSTM.
+
+### 3.4 Entradas, escalado y pérdida
+
+Cada rama recibe sus RIMF, las 11 covariables y 2 canales estáticos de la cuenca:
+
+| Entrada | Canales | Contenido |
+|---|---:|---|
+| `hf` (rama Informer) | 18 | 5 RIMF HF + 11 meteorológicas + log $s_b$ + log $\mu_b$ |
+| `lf` (rama LSTM) | 14 | 1 RIMF LF + 11 meteorológicas + 2 estáticos |
+| `raw` (ablación sin MRS) | 14 | caudal + 11 meteorológicas + 2 estáticos |
+
+- El caudal, los RIMF y el objetivo se dividen por $s_b=\sigma_b+0.01$ mm/h (estadísticas de train de cada
+  cuenca). Escalar conmuta con CEEMDAN porque el ruido es relativo a la desviación de la señal.
+- Luego cada canal se estandariza (z-score con estadísticas de train).
+- Los canales estáticos devuelven la magnitud del caudal que el escalado por cuenca borra.
+- La pérdida es el MSE en el espacio escalado, que equivale a la **NSE\*** de Kratzert et al. (2019):
+
+$$
+\mathcal{L}=\frac{1}{48N}\sum_{n=1}^{N}\sum_{h=1}^{48}\left(\frac{\hat{y}_{n,h}-y_{n,h}}{s_{b(n)}}\right)^2.
+$$
+
+Sin este escalado, las pocas cuencas de caudal alto dominarían la pérdida.
+
+### 3.5 Arquitectura implementada
+
+```{mermaid}
+flowchart LR
+    A["Historia · 336 h × 12"] --> Q["Caudal · 336"]
+    A --> M["11 covariables + 2 estáticos"]
+    Q --> C["CEEMDAN por ventana · 6 IMF + residuo"]
+    C --> S["MRS · sample entropy + votos"]
+    S --> H["RIMF HF · IMF1…IMF5"]
+    S --> L["RIMF LF · IMF6 + residuo"]
+    H --> I["Informer · 18 canales"]
+    M --> I
+    L --> T["LSTM · 14 canales"]
+    M --> T
+    I --> P["suma"]
+    T --> P
+    P --> Y["48 h de caudal"]
+```
+
+**Informer** (`src/dmel/informer.py`), con los hiperparámetros de la Tabla 1 del paper:
+
+- Embedding: Conv1d ($k=3$, padding *replicate*) + codificación posicional sinusoidal; sin embedding temporal.
+- Encoder: 2 capas con **atención ProbSparse** y 1 capa de **distilling**
+  (Conv1d → BatchNorm → ELU → MaxPool, 336 → 168 pasos).
+- Decoder generativo de 1 capa: las últimas 48 h conocidas más 48 ceros; self-attention ProbSparse causal,
+  cross-attention completa y proyección a 1 salida por hora.
+- $d_{\text{model}}=256$, 8 cabezas, $d_{ff}=1024$, GELU, dropout 0.1.
+
+La atención ProbSparse solo calcula atención completa para las $u=c\ln L$ queries más activas, medidas con
+
+$$
+\bar{M}(\mathbf{q}_i,\mathbf{K})=\max_{j}\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}-\frac{1}{U}\sum_{j\in\mathcal{U}}\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}},
+$$
+
+que aproxima la divergencia KL entre la atención de la query y la distribución uniforme ($U=c\ln L_K$ claves
+muestreadas). Con $c=5$ son 30 de las 336 queries en el encoder y 25 de 96 en el decoder; las demás reciben
+la media de $V$ (media acumulada si es causal). Respecto del código oficial se corrigieron cuatro detalles:
+un solo muestreo de claves por pasada (evita un tensor de ~2.6 GB por capa), la media sobre las claves
+muestreadas, la media acumulada en lugar de la suma y sin el reshape `mix`. Un test verifica que ProbSparse
+coincide con la atención completa cuando $u\ge L$.
+
+**LSTM** (`src/dmel/models.py`): 2 capas de 256 unidades (Tabla 1); el último estado oculto pasa por
+Linear(256 → 48).
+
+**Ensamble** (`TwoBranch`): suma de las dos ramas, entrenada de punta a punta sobre el caudal futuro. Los
+componentes futuros no existen en inferencia, así que no se supervisa cada rama por separado. Total:
+3.68 M parámetros.
+
+### 3.6 Diferencias con el paper
+
+| Paper | Este trabajo | Motivo |
+|---|---|---|
+| CEEMDAN de la serie completa | CEEMDAN de cada ventana (solo historia) | Evitar la fuga de información; en test solo existe la historia |
+| Agrupación visual por estación | Regla automática global por votos | 508 cuencas con un modelo; reproduce la Tabla 3 del paper |
+| Cada modelo predice componentes futuros | Las ramas se suman y se entrenan sobre el caudal | Los componentes futuros no existen en inferencia |
+| Diario: 7 días → 1/3/5/7 días | Horario: 336 h → 48 h directas | Enunciado del laboratorio |
+| Embedding temporal global | Omitido | No hay fechas |
+| MSE | NSE\* con escala por cuenca + 2 canales estáticos | Caudal de magnitudes muy distintas entre cuencas |
+| Batch 32, lr 1e-4, 100 épocas | Batch 256, lr 3e-4 + warmup, early stopping (máx. 30) | ~250× más datos: una época equivale a ~30 del paper |
+| 10 corridas + Wilcoxon | 1 semilla + Wilcoxon sobre las 508 cuencas | Tiempo de GPU (1 GPU por usuario en KHIPU) |
+
+## 4. Entrenamiento
+
+| Parámetro | Valor |
+|---|---|
+| Optimizador | Adam, lr $3\times10^{-4}$, warmup lineal de 500 pasos |
+| Scheduler | ReduceLROnPlateau (factor 0.5, paciencia 2) |
+| Batch | 256 (993 pasos por época) |
+| Épocas | máximo 30; early stopping con paciencia 5 sobre la pérdida de validación |
+| Regularización | dropout 0.1; clip de norma de gradiente 1.0 |
+| Precisión | float32 con TF32 |
+| Hardware | NVIDIA RTX A6000 48 GB (KHIPU); ~2 min por época para DMEL |
+| Semillas | 0 (pesos y batches, ruido de CEEMDAN, muestras del MRS y de normalización) |
+
+![Pérdida NSE\* de train y validación, NSE mediano de validación y learning rate.](results/figures/training_curves.png)
+
+{{< include results/tables/training.md >}}
+
+## 5. Modelo base y ablaciones
+
+| Corrida | Rama 1 | Rama 2 | Pregunta |
+|---|---|---|---|
+| Persistencia | — | — | Modelo base ingenuo: último caudal observado |
+| **DMEL** | Informer(RIMF HF) | LSTM(RIMF LF) | Propuesta del paper |
+| Ablación: asignación invertida | LSTM(RIMF HF) | Informer(RIMF LF) | ¿Importa qué modelo recibe cada frecuencia? (paper, Sec. 5.2) |
+| Ablación: sin MRS | Informer(caudal) | LSTM(caudal) | ¿Aporta la descomposición? Misma arquitectura y tamaño, sin CEEMDAN ni SE |
+
+Las tres redes tienen la misma capacidad (~3.7 M parámetros) y el mismo entrenamiento; solo cambia la
+entrada de cada rama o la asignación de frecuencias.
+
+## 6. Métricas
+
+$$
+\mathrm{NSE}=1-\frac{\sum_t (q_t-\hat{q}_t)^2}{\sum_t (q_t-\bar{q})^2},\qquad
+\mathrm{KGE}=1-\sqrt{(r-1)^2+(\alpha-1)^2+(\beta-1)^2},
+$$
+
+con $r$ la correlación, $\alpha=\sigma_{\hat{q}}/\sigma_q$ y $\beta=\mu_{\hat{q}}/\mu_q$.
+
+- NSE y KGE se calculan **por cuenca** (todas sus ventanas y horizontes) y se resume con la **mediana entre
+  cuencas**. RMSE y MAE se agregan sobre todas las predicciones.
+- NSE por horizonte (1–48 h), como el análisis multi-paso del paper.
+- Crecidas: ventanas cuyo pico observado supera el cuantil 0.95 de su cuenca. Error del pico
+  $\mathrm{EP}=(\hat{q}_{\max}-q_{\max})/q_{\max}\times100\,\%$ y desfase del pico en horas (paper, Sec. 5.5).
+- Significancia: Wilcoxon pareado sobre el NSE de las cuencas (en lugar de 10 corridas repetidas).
+
+## 7. Resultados
+
+### 7.1 Validación
+
+{{< include results/tables/metrics_val.md >}}
+
+### 7.2 Test
+
+{{< include results/tables/metrics_test.md >}}
+
+![NSE mediano entre cuencas para cada horizonte de pronóstico (test).](results/figures/nse_by_lead.png)
+
+![Distribución del NSE de las 508 cuencas en horizontes clave (test).](results/figures/nse_boxes.png)
+
+::: {.callout-note}
+Interpretación pendiente: se completa con los resultados finales del entrenamiento en KHIPU.
+:::
+
+### 7.3 Ablaciones
+
+{{< include results/tables/wilcoxon_test.md >}}
+
+![Distribución acumulada del NSE por cuenca (test).](results/figures/nse_cdf.png)
+
+::: {.callout-note}
+Interpretación pendiente: efecto del MRS (DMEL vs sin MRS) y de la asignación de frecuencias (DMEL vs
+asignación invertida).
+:::
+
+## 8. Análisis de errores
+
+### 8.1 Crecidas
+
+![Las mayores crecidas de test: últimas 72 h observadas y 48 h pronosticadas.](results/figures/events.png)
+
+![Aporte de cada rama de DMEL en las mismas crecidas.](results/figures/branches.png)
+
+![Error de magnitud y desfase del pico en las ventanas de crecida.](results/figures/peaks.png)
+
+### 8.2 Regímenes de caudal y cuencas
+
+{{< include results/tables/regimes_test.md >}}
+
+![Error absoluto relativo por régimen de caudal (terciles de cada cuenca).](results/figures/regimes.png)
+
+![NSE de cada cuenca frente a su caudal medio.](results/figures/nse_vs_flow.png)
+
+![Observado frente a pronosticado a 24 h.](results/figures/scatter_24h.png)
+
+::: {.callout-note}
+Interpretación pendiente: principales errores y en qué cuencas y regímenes falla el modelo.
+:::
+
+## 9. Limitaciones
+
+- **Efecto de borde**: sin el futuro, los componentes de las últimas horas son los menos estables, y son
+  justo los más importantes para pronosticar.
+- **MRS global**: una sola agrupación para las 508 cuencas; en algunas, un componente limítrofe (IMF5/IMF6)
+  podría pertenecer al otro grupo.
+- **Ramas no supervisadas por separado**: el aporte de cada rama es una interpretación, no un pronóstico
+  de cada banda de frecuencia.
+- **Una semilla** por modelo: la significancia se mide entre cuencas, no entre corridas.
+- **Sin covariables futuras**: la lluvia de las próximas 48 h (`y_aux`) no está disponible en inferencia,
+  lo que limita el pronóstico del inicio de crecidas que aún no empezaron.
+
+## 10. Reproducibilidad
+
+```bash
+uv sync --frozen && uv run pytest                   # 19 tests
+bash hpc/push.sh                                    # sube el commit actual a KHIPU
+sbatch hpc/decompose.slurm                          # CEEMDAN + MRS (CPU)
+sbatch --dependency=afterok:<id> hpc/train.slurm    # dmel, dmel_swap, hybrid_raw + evaluación
+bash hpc/pull.sh && quarto render REPORT.qmd
+```
+
+Los hiperparámetros, las semillas y el entorno están detallados en el `README.md`. Las predicciones de
+test están en `predictions/<corrida>_test.csv` con el formato `Id, q_01…q_48` (mm/h).
+
+## 11. Uso de IA generativa
+
+Este trabajo se desarrolló con asistencia de IA generativa (Claude, de Anthropic) para escribir y revisar
+código y documentación. El grupo revisó y validó las decisiones de implementación y los resultados.
+
+## Referencias
+
+- Wang, W.-c., Gu, M., Li, Z., Wang, Y.-y., Zhao, Y.-w. (2026). DMEL: A novel dual-modal ensemble learning architecture for multi-step runoff prediction. *Applied Soft Computing*, 192, 114792.
+- Colominas, M. A., Schlotthauer, G., Torres, M. E. (2014). Improved complete ensemble EMD: A suitable tool for biomedical signal processing. *Biomedical Signal Processing and Control*, 14, 19–29.
+- Zhou, H. et al. (2021). Informer: Beyond efficient transformer for long sequence time-series forecasting. *AAAI*.
+- Richman, J. S., Moorman, J. R. (2000). Physiological time-series analysis using approximate entropy and sample entropy. *Am. J. Physiol. Heart Circ. Physiol.*, 278(6).
+- Kratzert, F. et al. (2019). Towards learning universal, regional, and local hydrological behaviors via machine learning applied to large-sample datasets. *HESS*, 23, 5089–5110.
+- Fang, W. et al. (2019). Examining the applicability of different sampling techniques in the development of decomposition-based streamflow forecasting models. *Journal of Hydrology*, 568, 534–550.
