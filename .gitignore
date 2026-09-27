@@ -22,3 +22,4 @@ smoke/
 .claude/worktrees/
 REVISION
 .quarto/
+.claude/launch.json
