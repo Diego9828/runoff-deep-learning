@@ -88,9 +88,12 @@ Flujo completo en KHIPU:
 bash hpc/push.sh                                    # sube el commit actual y hace uv sync
 ssh khipu
 cd runoff_deep_learning
-D=$(sbatch --parsable hpc/decompose.slurm)          # CEEMDAN + MRS en CPU (~15 min)
+D=$(sbatch --parsable hpc/decompose.slurm)          # CEEMDAN + MRS en CPU (~25 min con 24 CPUs)
 sbatch --dependency=afterok:$D hpc/train.slurm      # dmel, dmel_swap, hybrid_raw en la A100 + evaluación
 ```
+
+`train.slurm` pide la A100 completa (`gpu:a100:1`). Si está ocupada, se puede usar un slice MIG de la
+misma A100 sin editar el script: `sbatch --gres=gpu:a100_3g.20gb:1 ...` (20 GB alcanzan con batch 256).
 
 Salidas: `artifacts/` (componentes, `mrs.json`, tabla y figura de entropías), `runs/<corrida>/`
 (checkpoint, historia de entrenamiento, predicciones), `predictions/<corrida>_test.csv` (formato
