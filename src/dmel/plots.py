@@ -70,7 +70,7 @@ def leakage(base, future, hist, table, path):
     """Cambio de los componentes al descomponer también el futuro (protocolo del paper) vs control."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 3.9))
     table.plot.bar(ax=ax1, rot=0)
-    ax1.set(ylabel="cambio RMS / std del componente", title="Últimas 48 h de historia (mediana de 40 ventanas)")
+    ax1.set(ylabel="cambio RMS / std del caudal", title="Últimas 48 h de historia (mediana de 200 ventanas)")
     t = np.arange(-HIST, 0)[-120:]
     ax2.plot(t, base[0, -1, -120:], label="residuo: solo historia (este trabajo)")
     ax2.plot(t, future[0, -1, -120:], label="residuo: historia + futuro (paper)")

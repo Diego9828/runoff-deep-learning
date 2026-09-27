@@ -130,22 +130,25 @@ def mrs_tables(mrs):
     return components, groups
 
 
-def leakage_study(split, path, n_windows=40):
+def leakage_study(split, path, n_windows=200, seed=0):
     """¿Cuánto cambian los componentes si se descompone también el futuro (como en el paper)?
 
     Compara la descomposición de la historia (336 h) con la de historia + futuro (384 h) en las últimas 48 h de
-    historia. Control: dos descomposiciones de la misma historia con bancos de ruido distintos.
+    historia, en ventanas de validación al azar (la primera es la mayor crecida, para el ejemplo de la figura).
+    Control: dos descomposiciones de la misma historia con bancos de ruido distintos.
     """
-    rows = pick_events(split, n_windows)
+    rng = np.random.default_rng(seed)
+    moving = np.flatnonzero(split["hist"].std(1) > 0)  # sin ventanas constantes (cuencas secas)
+    rows = np.concatenate([pick_events(split, 1), rng.choice(moving, min(n_windows, len(moving)), replace=False)])
     hist = split["hist"][rows].astype(np.float64)
     both = np.concatenate([hist, split["obs"][rows]], axis=1)
     base = decompose_all(hist, noise_bank(100, HIST, 6, seed=0), 0.2, 10)
     control = decompose_all(hist, noise_bank(100, HIST, 6, seed=1), 0.2, 10)
     future = decompose_all(both, noise_bank(100, HIST + HORIZON, 6, seed=0), 0.2, 10)[:, :, :HIST]
 
-    def change(other):  # RMS del cambio en las últimas 48 h / std del componente en toda la ventana
+    def change(other):  # RMS del cambio en las últimas 48 h / std del caudal de la ventana
         rms = np.sqrt(np.mean((other[:, :, -HORIZON:] - base[:, :, -HORIZON:]) ** 2, axis=2))
-        return np.median(rms / (base.std(2) + 1e-9), axis=0)
+        return np.median(rms[1:] / hist[1:].std(1, keepdims=True), axis=0)
 
     names = [f"IMF{k + 1}" for k in range(6)] + ["residuo"]
     table = pd.DataFrame({"descomponiendo también el futuro": change(future), "control (otro ruido)": change(control)},
