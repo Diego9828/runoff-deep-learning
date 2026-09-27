@@ -29,7 +29,7 @@ def test_informer_encoder_distils_to_half():
 
 @pytest.mark.parametrize("name", list(VARIANTS))
 def test_variants_output_48_hours(name):
-    channels = {"raw": 14, "hf": 18, "lf": 14}
+    channels = {"raw": 14, "hf": 18, "lf": 14, "lf_q": 15}
     model = build_model(name, {k: channels[k] for k in input_keys(name)})
     inputs = {k: torch.randn(3, 336, channels[k]) for k in input_keys(name)}
     assert model(inputs).shape == (3, 48)

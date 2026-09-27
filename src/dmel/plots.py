@@ -20,8 +20,10 @@ LABELS = {
     "dmel_s0": "DMEL (paper)",
     "dmel_swap_s0": "Ablación: asignación invertida",
     "hybrid_raw_s0": "Ablación: sin MRS",
+    "dmel_q_s0": "Variante: DMEL + caudal",
 }
-COLORS = {"persistence": "0.55", "dmel_s0": "tab:purple", "dmel_swap_s0": "tab:orange", "hybrid_raw_s0": "tab:green"}
+COLORS = {"persistence": "0.55", "dmel_s0": "tab:purple", "dmel_swap_s0": "tab:orange", "hybrid_raw_s0": "tab:green",
+          "dmel_q_s0": "tab:brown"}
 HF_COLOR, LF_COLOR = "tab:red", "tab:blue"
 
 

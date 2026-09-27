@@ -38,6 +38,7 @@ VARIANTS = {
     "dmel": (("hf", "informer"), ("lf", "lstm")),  # propuesta del paper
     "dmel_swap": (("hf", "lstm"), ("lf", "informer")),  # ablación 1: asignación invertida (paper, sección 5.2)
     "hybrid_raw": (("raw", "informer"), ("raw", "lstm")),  # ablación 2: sin MRS (misma arquitectura)
+    "dmel_q": (("hf", "informer"), ("lf_q", "lstm")),  # variante: el LSTM también ve el caudal observado
 }
 
 NETS = {"informer": Informer, "lstm": LSTMNet}

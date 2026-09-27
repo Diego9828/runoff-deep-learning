@@ -7,9 +7,10 @@
 #SBATCH --mem=64G
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/%x-%j.out
-# Entrena DMEL y las dos ablaciones en secuencia en la A100 (1 GPU por usuario) y luego evalúa.
-# Uso: sbatch --dependency=afterok:<id_ceemdan> hpc/train.slurm
-#      MODELS="dmel" SEED=1 sbatch hpc/train.slurm
+# Entrena en secuencia los modelos de MODELS (1 GPU por usuario) y luego evalúa todo lo terminado en runs/.
+# Con 100 épocas cada modelo toma ~3.4 h en una RTX A6000: van 2 modelos por job para no pasar de 8 h.
+# Uso: MODELS="dmel dmel_q" sbatch hpc/train.slurm
+#      MODELS="dmel_swap hybrid_raw" sbatch --dependency=afterany:<id_anterior> hpc/train.slurm
 # Las corridas terminadas (runs/<modelo>_s<seed>/done) se omiten, así que se puede reenviar sin perder nada.
 set -uo pipefail
 
@@ -18,7 +19,7 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 export NUMBA_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
-for model in ${MODELS:-dmel dmel_swap hybrid_raw}; do
+for model in ${MODELS:?"define MODELS, por ejemplo MODELS=\"dmel dmel_q\""}; do
     uv run --no-sync dmel-train --model "$model" --seed "${SEED:-0}" || echo "ERROR: falló $model"
 done
 uv run --no-sync dmel-evaluate

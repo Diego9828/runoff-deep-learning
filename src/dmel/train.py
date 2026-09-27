@@ -10,7 +10,8 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 
-from dmel.data import HORIZON, TARGET, basin_scales, batches, fit_norm, load_groups, load_h5, make_inputs, normalize
+from dmel.data import (HORIZON, SOURCES, TARGET, basin_scales, batches, fit_norm, load_groups, load_h5, make_inputs,
+                       normalize)
 from dmel.metrics import nse, per_basin
 from dmel.models import VARIANTS, build_model, input_keys
 
@@ -20,7 +21,7 @@ def load_sets(a, keys):
     data, art = Path(a.data), Path(a.artifacts)
     full = load_h5(data / "train.h5", a.limit)
     test = load_h5(data / "test.h5", a.limit, fields=("X", "basin_id"))
-    uses_mrs = "hf" in keys or "lf" in keys
+    uses_mrs = any(src in ("high", "low") for k in keys for src in SOURCES[k])
     groups = load_groups(art / "mrs.json") if uses_mrs else ((), ())
 
     def components(name, n):
@@ -85,11 +86,12 @@ def main():
     p.add_argument("--artifacts", default="artifacts")
     p.add_argument("--runs", default="runs")
     p.add_argument("--predictions", default="predictions")
-    p.add_argument("--epochs", type=int, default=30)
+    p.add_argument("--epochs", type=int, default=100, help="épocas de entrenamiento (paper: 100)")
     p.add_argument("--batch", type=int, default=256)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--warmup", type=int, default=500, help="pasos de warmup lineal del learning rate")
-    p.add_argument("--patience", type=int, default=5, help="épocas sin mejorar en validación antes de parar")
+    p.add_argument("--patience", type=int, default=None,
+                   help="early stopping: épocas sin mejorar en validación antes de parar (por defecto no se para)")
     p.add_argument("--clip", type=float, default=1.0)
     p.add_argument("--limit", type=int, help="solo las primeras N filas de cada .h5 (pruebas rápidas)")
     a = p.parse_args()
@@ -153,7 +155,7 @@ def main():
             torch.save(model.state_dict(), run / "best.pt")
         else:
             bad_epochs += 1
-            if bad_epochs >= a.patience:
+            if a.patience is not None and bad_epochs >= a.patience:
                 print(f"Early stopping: {a.patience} épocas sin mejorar en validación.")
                 break
 

@@ -59,24 +59,31 @@ def rimfs(comps, groups):
     return np.stack([comps[:, g].sum(1) for g in groups], axis=-1)
 
 
+# señales de caudal de cada tipo de entrada: q = caudal observado, high/low = RIMFs del MRS
+SOURCES = {
+    "raw": ("q",),  # sin descomposición
+    "hf": ("high",),  # RIMFs de alta frecuencia
+    "lf": ("low",),  # RIMFs de baja frecuencia
+    "lf_q": ("low", "q"),  # baja frecuencia + caudal observado (variante dmel_q)
+}
+
+
 def make_inputs(keys, X, comps, basin, scale, mu, groups=((), ())):
     """Entradas (aún sin normalizar) de cada rama: dict clave -> [N, 336, C] float32.
 
-    Canales: [caudal o RIMFs] / s_b  +  11 covariables  +  2 estáticos (log s_b, log μ_b).
-      raw: caudal observado (sin descomposición)
-      hf / lf: RIMFs de alta / baja frecuencia del MRS (groups = (high, low))
+    Canales: [caudal y/o RIMFs según SOURCES] / s_b  +  11 covariables  +  2 estáticos (log s_b, log μ_b).
+    groups = (high, low): grupos de componentes del MRS.
     """
     s = scale[basin][:, None, None]
     met = X[:, :, :TARGET]
     static = np.stack([np.log(scale[basin]), np.log(mu[basin] + EPS)], axis=-1).astype(np.float32)
     static = np.broadcast_to(static[:, None, :], (len(X), X.shape[1], 2))
+    high, low = groups
+    signals = {"q": lambda: X[:, :, TARGET : TARGET + 1], "high": lambda: rimfs(comps, high),
+               "low": lambda: rimfs(comps, low)}
     out = {}
     for key in keys:
-        if key == "raw":
-            q = X[:, :, TARGET : TARGET + 1] / s
-        else:
-            high, low = groups
-            q = rimfs(comps, high if key == "hf" else low) / s
+        q = np.concatenate([signals[name]() for name in SOURCES[key]], axis=-1) / s
         out[key] = np.concatenate([q, met, static], axis=-1, dtype=np.float32)
     return out
 
