@@ -1,33 +1,21 @@
-"""CLI: métricas de validación y test, persistencia, Wilcoxon por cuenca y figuras para el informe.
+"""CLI: métricas de validación y test, persistencia, Wilcoxon por cuenca, tablas y figuras del informe.
 
 Es el único script que lee test_targets.csv (solo para el reporte final, nunca para elegir modelos).
+Salidas en --out: *.csv (números), tables/*.md (tablas para incluir en Quarto) y figures/*.png.
 """
 
 import argparse
+import json
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import wilcoxon
 
-from dmel import metrics
+from dmel import metrics, plots
 from dmel.ceemdan import decompose_all, noise_bank
 from dmel.data import HIST, HORIZON, load_discharge, load_h5
-
-LABELS = {
-    "persistence": "Persistencia",
-    "dmel_s0": "DMEL (paper)",
-    "dmel_swap_s0": "Ablación: asignación invertida",
-    "hybrid_raw_s0": "Ablación: sin MRS",
-}
-
-
-def label(name):
-    return LABELS.get(name, name)
+from dmel.plots import label
 
 
 def load_truth(data, limit):
@@ -51,57 +39,8 @@ def load_predictions(runs, split, hist):
     return preds
 
 
-def wilcoxon_table(obs, basin, preds, ref):
-    """Wilcoxon pareado sobre el NSE de cada cuenca: `ref` contra cada modelo."""
-    nse_b = {n: pd.Series(metrics.per_basin(obs, p, basin, metrics.nse)) for n, p in preds.items()}
-    rows = []
-    for name in preds:
-        if name == ref:
-            continue
-        both = pd.concat([nse_b[ref], nse_b[name]], axis=1).dropna()
-        diff = both.iloc[:, 0] - both.iloc[:, 1]
-        rows.append({"comparación": f"{label(ref)} vs {label(name)}", "mediana ΔNSE": diff.median(),
-                     "cuencas donde gana": f"{int((diff > 0).sum())}/{len(diff)}",
-                     "p-valor": wilcoxon(both.iloc[:, 0], both.iloc[:, 1]).pvalue})
-    return pd.DataFrame(rows).set_index("comparación"), nse_b
-
-
-def markdown(df, digits=3):
-    """Tabla markdown simple (evita depender de tabulate)."""
-    def fmt(v):
-        return f"{v:.{digits}g}" if isinstance(v, float) and abs(v) < 1e-2 else (f"{v:.{digits}f}" if isinstance(v, float) else str(v))
-    lines = ["| " + " | ".join([""] + [str(c) for c in df.columns]) + " |", "|" + "---|" * (len(df.columns) + 1)]
-    lines += ["| " + " | ".join([str(i)] + [fmt(v) for v in row]) + " |" for i, row in zip(df.index, df.to_numpy())]
-    return "\n".join(lines)
-
-
-def plot_leads(lead_nse, path):
-    fig, ax = plt.subplots(figsize=(7, 4))
-    for name, values in lead_nse.items():
-        ax.plot(np.arange(1, HORIZON + 1), values, label=label(name), ls="--" if name == "persistence" else "-")
-    ax.set(xlabel="Horizonte (h)", ylabel="NSE (mediana entre cuencas)", title="Test: NSE por horizonte")
-    ax.grid(alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
-def plot_cdf(nse_b, path):
-    fig, ax = plt.subplots(figsize=(6, 4))
-    for name, values in nse_b.items():
-        v = np.sort(np.clip(values.dropna().to_numpy(), -1, 1))
-        ax.plot(v, np.linspace(0, 1, len(v)), label=label(name), ls="--" if name == "persistence" else "-")
-    ax.set(xlabel="NSE por cuenca (recortado en -1)", ylabel="Fracción de cuencas", title="Test: distribución del NSE")
-    ax.grid(alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-
-
 def pick_events(split, n=4):
-    """Ventanas de test con las mayores subidas de caudal, en cuencas distintas."""
+    """Ventanas con las mayores subidas de caudal, en cuencas distintas."""
     rise = (split["obs"].max(1) - split["hist"][:, -1]) / (split["hist"].std(1) + 1e-3)
     events, seen = [], set()
     for i in np.argsort(rise)[::-1]:
@@ -113,48 +52,82 @@ def pick_events(split, n=4):
     return events
 
 
-def plot_events(split, preds, branches, events, path):
-    """Hidrogramas de eventos de crecida y aporte de cada rama de DMEL (fila inferior)."""
-    fig, axes = plt.subplots(2, len(events), figsize=(4 * len(events), 6.5), squeeze=False)
-    t_hist, t_future = np.arange(-72, 0), np.arange(0, HORIZON)
-    for col, i in enumerate(events):
-        top, bottom = axes[0, col], axes[1, col]
-        for ax in (top, bottom):
-            ax.plot(t_hist, split["hist"][i, -72:], color="k", lw=1)
-            ax.plot(t_future, split["obs"][i], color="k", lw=2, label="observado")
-        for name, p in preds.items():
-            top.plot(t_future, p[i], ls="--" if name == "persistence" else "-", label=label(name))
-        if branches is not None:
-            bottom.plot(t_future, branches[i].sum(0), color="tab:purple", label="DMEL = suma")
-            bottom.plot(t_future, branches[i, 0], color="tab:red", label="rama HF (Informer)")
-            bottom.plot(t_future, branches[i, 1], color="tab:blue", label="rama LF (LSTM)")
-        top.set_title(f"cuenca {split['basin'][i]}, ventana {i}")
-        bottom.set_xlabel("horas desde el pronóstico")
-    axes[0, 0].set_ylabel("caudal (mm/h)")
-    axes[1, 0].set_ylabel("caudal (mm/h)")
-    axes[0, 0].legend(fontsize=7)
-    axes[1, 0].legend(fontsize=7)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
+def per_basin_table(split, preds):
+    columns = {f"{m} {label(n)}": pd.Series(metrics.per_basin(split["obs"], p, split["basin"], fn))
+               for n, p in preds.items() for m, fn in (("NSE", metrics.nse), ("KGE", metrics.kge))}
+    return pd.DataFrame(columns).rename_axis("cuenca")
 
 
-def plot_regimes(split, preds, path):
-    """Error absoluto relativo (Σ|s - o| / Σo) por régimen de caudal (terciles de cada cuenca)."""
+def wilcoxon_table(split, preds, ref):
+    """Wilcoxon pareado sobre el NSE de cada cuenca: `ref` contra cada modelo."""
+    nse_b = {n: pd.Series(metrics.per_basin(split["obs"], p, split["basin"], metrics.nse)) for n, p in preds.items()}
+    rows = {}
+    for name in preds:
+        if name == ref:
+            continue
+        both = pd.concat([nse_b[ref], nse_b[name]], axis=1).dropna()
+        diff = both.iloc[:, 0] - both.iloc[:, 1]
+        pvalue = wilcoxon(both.iloc[:, 0], both.iloc[:, 1]).pvalue
+        rows[f"{label(ref)} vs {label(name)}"] = {
+            "mediana ΔNSE": diff.median(),
+            "cuencas donde gana": f"{int((diff > 0).sum())}/{len(diff)}",
+            "p-valor": f"{pvalue:.1e}" if pvalue > 0 else "< 1e-300",
+        }
+    return pd.DataFrame(rows).T.rename_axis("comparación"), nse_b
+
+
+def regimes_table(split, preds):
+    """Error absoluto relativo (Σ|s - o| / Σo, %) por régimen de caudal (terciles de cada cuenca)."""
     obs, basin = split["obs"], split["basin"]
     regime = np.zeros(obs.shape, int)
     for b in np.unique(basin):
         rows = basin == b
         regime[rows] = np.digitize(obs[rows], np.quantile(obs[rows], [1 / 3, 2 / 3]))
-    names = ["bajo", "medio", "alto"]
-    table = pd.DataFrame({label(n): [100 * np.abs(p - obs)[regime == r].sum() / obs[regime == r].sum() for r in range(3)]
-                          for n, p in preds.items()}, index=names)
-    ax = table.plot.bar(figsize=(7, 4), rot=0)
-    ax.set(ylabel="error absoluto relativo (%)", xlabel="régimen de caudal", title="Test: error por régimen de caudal")
-    ax.figure.tight_layout()
-    ax.figure.savefig(path, dpi=150)
-    plt.close(ax.figure)
-    return table
+    return pd.DataFrame(
+        {label(n): [100 * np.abs(p - obs)[regime == r].sum() / obs[regime == r].sum() for r in range(3)]
+         for n, p in preds.items()},
+        index=pd.Index(["bajo", "medio", "alto"], name="régimen"),
+    )
+
+
+def peaks_table(split, preds):
+    frames = []
+    for name, p in preds.items():
+        ep, lag = metrics.peak_errors(split["obs"], p, split["basin"])
+        frames.append(pd.DataFrame({"modelo": label(name), "EP_%": ep, "desfase_h": lag}))
+    return pd.concat(frames, ignore_index=True)
+
+
+def training_table(runs, histories):
+    rows = {}
+    for name, h in histories.items():
+        config = json.loads((Path(runs) / name / "config.json").read_text())
+        best = h.loc[h["val_loss"].idxmin()]
+        rows[label(name)] = {
+            "parámetros (M)": config["parametros"] / 1e6,
+            "épocas entrenadas": len(h),
+            "mejor época": int(best["epoch"]),
+            "NSE* val (mejor)": best["val_loss"],
+            "NSE val mediana (mejor)": best["val_nse_mediana"],
+            "min por época": h["segundos"].mean() / 60,
+            "horas totales": h["segundos"].sum() / 3600,
+        }
+    return pd.DataFrame(rows).T.rename_axis("corrida")
+
+
+def mrs_tables(mrs):
+    components = pd.DataFrame({
+        "presente (%)": 100 * np.array(mrs["component_present"]),
+        "SE mediana": mrs["component_se_median"],
+        "voto SE > SE original": mrs["component_votes"],
+    }, index=pd.Index(mrs["components"], name="componente"))
+    groups = pd.DataFrame({
+        "componentes": [" + ".join(mrs["components"][k] for k in g) for g in mrs["groups"]],
+        "SE mediana": mrs["group_se_median"],
+        "voto": mrs["group_votes"],
+        "rama": ["alta frecuencia → Informer" if lab == "high" else "baja frecuencia → LSTM" for lab in mrs["labels"]],
+    }, index=pd.Index([f"RIMF{j + 1}" for j in range(len(mrs["groups"]))], name="RIMF"))
+    return components, groups
 
 
 def leakage_study(split, path, n_windows=40):
@@ -176,64 +149,109 @@ def leakage_study(split, path, n_windows=40):
 
     names = [f"IMF{k + 1}" for k in range(6)] + ["residuo"]
     table = pd.DataFrame({"descomponiendo también el futuro": change(future), "control (otro ruido)": change(control)},
-                         index=names)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 3.8))
-    table.plot.bar(ax=ax1, rot=0)
-    ax1.set(ylabel="cambio RMS / std del componente", title="Últimas 48 h de historia")
-    t = np.arange(-HIST, 0)
-    ax2.plot(t[-120:], base[0, -1, -120:], label="residuo, solo historia (este trabajo)")
-    ax2.plot(t[-120:], future[0, -1, -120:], label="residuo, historia + futuro (paper)")
-    ax2.plot(t[-120:], hist[0, -120:], color="k", lw=0.8, label="caudal")
-    ax2.set(xlabel="horas antes del pronóstico", ylabel="mm/h", title="Ejemplo: fuga de información del futuro")
-    ax2.legend(fontsize=7)
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
+                         index=pd.Index(names, name="componente"))
+    plots.leakage(base, future, hist, table, path)
     return table
+
+
+def markdown(df, digits=3):
+    """Tabla markdown simple (evita depender de tabulate)."""
+    def fmt(v):
+        if isinstance(v, float) and v.is_integer() and abs(v) >= 1:  # conteos (épocas, cuencas)
+            return str(int(v))
+        if isinstance(v, float):
+            return f"{v:.{digits}g}" if abs(v) < 1e-2 else f"{v:.{digits}f}"
+        return str(v)
+    lines = ["| " + " | ".join([df.index.name or ""] + [str(c) for c in df.columns]) + " |",
+             "|" + "---|" * (len(df.columns) + 1)]
+    lines += ["| " + " | ".join([str(i)] + [fmt(v) for v in row]) + " |" for i, row in zip(df.index, df.to_numpy())]
+    return "\n".join(lines)
+
+
+def write_table(df, out, name, digits=3):
+    """Guarda la tabla como CSV y como markdown (results/tables/<name>.md, para incluir en Quarto)."""
+    df.to_csv(out / f"{name}.csv")
+    text = markdown(df, digits)
+    (out / "tables" / f"{name}.md").write_text(text + "\n", encoding="utf-8")
+    return text
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--data", default="data")
     p.add_argument("--runs", default="runs")
+    p.add_argument("--artifacts", default="artifacts")
     p.add_argument("--out", default="results")
-    p.add_argument("--ref", default="dmel_s0", help="corrida de referencia para el test de Wilcoxon")
+    p.add_argument("--ref", default="dmel_s0", help="corrida de referencia (Wilcoxon, aporte de las ramas)")
     p.add_argument("--limit", type=int, help="mismo --limit usado en train (pruebas rápidas)")
     a = p.parse_args()
 
-    out = Path(a.out)
-    out.mkdir(parents=True, exist_ok=True)
+    out, figs = Path(a.out), Path(a.out) / "figures"
+    (out / "tables").mkdir(parents=True, exist_ok=True)
+    figs.mkdir(parents=True, exist_ok=True)
     truth = load_truth(Path(a.data), a.limit)
     report = ["# Resultados\n"]
+
+    preds = {}
     for split in ("val", "test"):
         s = truth[split]
-        preds = load_predictions(a.runs, split, s["hist"])
-        table = pd.DataFrame({label(n): metrics.summary(s["obs"], pr, s["basin"]) for n, pr in preds.items()}).T
-        table.to_csv(out / f"metrics_{split}.csv")
-        report += [f"## Métricas de {'validación' if split == 'val' else 'test'}\n", markdown(table.T), ""]
-        print(f"\n== {split} ==\n{table.T.round(3).to_string()}")
+        preds[split] = load_predictions(a.runs, split, s["hist"])
+        table = pd.DataFrame({label(n): metrics.summary(s["obs"], pr, s["basin"]) for n, pr in preds[split].items()})
+        name = "validación" if split == "val" else "test"
+        report += [f"## Métricas de {name}\n", write_table(table.rename_axis("métrica"), out, f"metrics_{split}"), ""]
+        print(f"\n== {split} ==\n{table.round(3).to_string()}")
+        lead = pd.DataFrame({label(n): metrics.per_lead(s["obs"], pr, s["basin"]) for n, pr in preds[split].items()},
+                            index=pd.Index(np.arange(1, HORIZON + 1), name="horizonte_h"))
+        lead.to_csv(out / f"nse_by_lead_{split}.csv")
+        per_basin_table(s, preds[split]).to_csv(out / f"per_basin_{split}.csv")
 
-    s = truth["test"]
-    preds = load_predictions(a.runs, "test", s["hist"])
-    lead_nse = {n: metrics.per_lead(s["obs"], pr, s["basin"]) for n, pr in preds.items()}
-    pd.DataFrame({label(n): v for n, v in lead_nse.items()}, index=np.arange(1, HORIZON + 1)).to_csv(out / "nse_by_lead.csv")
-    plot_leads(lead_nse, out / "nse_by_lead.png")
-    if a.ref in preds:
-        wtable, nse_b = wilcoxon_table(s["obs"], s["basin"], preds, a.ref)
-        wtable.to_csv(out / "wilcoxon_test.csv")
-        plot_cdf(nse_b, out / "nse_cdf.png")
-        report += ["## Wilcoxon pareado por cuenca (test)\n", markdown(wtable), ""]
+    s, p_test = truth["test"], preds["test"]
+    names = list(p_test)
+    plots.nse_by_lead({n: metrics.per_lead(s["obs"], pr, s["basin"]) for n, pr in p_test.items()}, figs / "nse_by_lead.png")
+    plots.nse_boxes(s, p_test, figs / "nse_boxes.png")
+    plots.scatter(s, p_test, figs / "scatter_24h.png")
+    rows = pick_events(s)
+    plots.events(s, p_test, rows, figs / "events.png")
+    ref_parts = Path(a.runs) / a.ref / "test_branches.npy"
+    if ref_parts.exists():
+        plots.branches(s, np.load(ref_parts), rows, figs / "branches.png")
+
+    regimes = regimes_table(s, p_test)
+    plots.regimes(regimes, names, figs / "regimes.png")
+    report += ["## Error por régimen de caudal (test, %)\n", write_table(regimes, out, "regimes_test"), ""]
+    peak_df = peaks_table(s, p_test)
+    peak_df.to_csv(out / "peaks_test.csv", index=False)
+    plots.peaks(peak_df, names, figs / "peaks.png")
+
+    if a.ref in p_test:
+        wtable, nse_b = wilcoxon_table(s, p_test, a.ref)
+        report += ["## Wilcoxon pareado por cuenca (test)\n", write_table(wtable, out, "wilcoxon_test"), ""]
+        plots.nse_cdf(nse_b, figs / "nse_cdf.png")
+        plots.nse_vs_flow(s, nse_b, [a.ref, "persistence"], figs / "nse_vs_flow.png")
         print(f"\n{wtable.to_string()}")
 
-    events = pick_events(s)
-    ref_branches = Path(a.runs) / a.ref / "test_branches.npy"
-    plot_events(s, preds, np.load(ref_branches) if ref_branches.exists() else None, events, out / "events.png")
-    regimes = plot_regimes(s, preds, out / "regimes.png")
-    leak = leakage_study(truth["val"], out / "leakage.png")
-    report += ["## Error por régimen de caudal (test, %)\n", markdown(regimes), "",
-               "## Fuga de información al descomponer también el futuro (validación)\n", markdown(leak), ""]
+    histories = {run.parent.name: pd.read_csv(run.parent / "history.csv") for run in sorted(Path(a.runs).glob("*/done"))}
+    if histories:
+        plots.training_curves(histories, figs / "training_curves.png")
+        pd.concat([h.assign(corrida=n) for n, h in histories.items()]).to_csv(out / "training_history.csv", index=False)
+        report += ["## Entrenamiento\n", write_table(training_table(a.runs, histories), out, "training"), ""]
+
+    art = Path(a.artifacts)
+    if (art / "mrs.json").exists():
+        mrs = json.loads((art / "mrs.json").read_text())
+        plots.entropy_bars(mrs, figs / "mrs_entropy.png")
+        comp_table, group_table = mrs_tables(mrs)
+        report += ["## MRS: entropía por componente\n", write_table(comp_table, out, "mrs_components"), "",
+                   "## MRS: grupos\n", write_table(group_table, out, "mrs_groups"), ""]
+        comps = np.load(art / "components_test.npy", mmap_mode="r")
+        plots.decomposition(s["hist"][rows[0]], np.asarray(comps[rows[0]]), mrs, s["basin"][rows[0]],
+                            figs / "decomposition.png")
+
+    leak = leakage_study(truth["val"], figs / "leakage.png")
+    report += ["## Fuga de información al descomponer también el futuro (validación)\n",
+               write_table(leak, out, "leakage_val"), ""]
     (out / "summary.md").write_text("\n".join(report), encoding="utf-8")
-    print(f"\n{leak.round(3).to_string()}\nFiguras y tablas en {out}/")
+    print(f"\n{leak.round(3).to_string()}\nTablas y figuras en {out}/")
 
 
 if __name__ == "__main__":

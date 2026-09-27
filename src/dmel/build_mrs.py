@@ -4,30 +4,12 @@ import argparse
 import json
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from dmel.data import load_discharge, load_h5
 from dmel.mrs import build_mrs
-
-
-def plot_entropy(mrs, path):
-    """Mediana de SE por componente vs la SE de la serie original (equivalente a la Fig. 9 del paper)."""
-    label_of = {k: label for g, label in zip(mrs["groups"], mrs["labels"]) for k in g}
-    colors = ["tab:red" if label_of[k] == "high" else "tab:blue" for k in range(len(mrs["components"]))]
-    fig, ax = plt.subplots(figsize=(7, 3.5))
-    ax.bar(mrs["components"], mrs["component_se_median"], color=colors)
-    ax.axhline(mrs["se_orig_median"], color="k", ls="--", label="serie original")
-    ax.set_ylabel("Sample entropy (mediana)")
-    ax.set_title("MRS: rojo = alta frecuencia (Informer), azul = baja frecuencia (LSTM)")
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
+from dmel.plots import entropy_bars
 
 
 def main():
@@ -58,7 +40,7 @@ def main():
         "voto_SE>SE_orig": mrs["component_votes"],
     })
     table.to_csv(art / "se_table.csv", index=False)
-    plot_entropy(mrs, art / "mrs_entropy.png")
+    entropy_bars(mrs, art / "mrs_entropy.png")
 
     print(table.round(3).to_string(index=False))
     print(f"SE mediana de la serie original: {mrs['se_orig_median']:.3f}")
