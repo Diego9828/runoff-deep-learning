@@ -28,7 +28,7 @@
       vertical-align: middle;
     }
   </style>
-  <link rel="stylesheet" href="PRESENTATION_files/libs/revealjs/dist/theme/quarto-7fa87eb07e15c839123b329e75985175.css">
+  <link rel="stylesheet" href="PRESENTATION_files/libs/revealjs/dist/theme/quarto-094b61f89f92957c4394c9f0c5256fad.css">
   <link href="PRESENTATION_files/libs/revealjs/plugin/quarto-line-highlight/line-highlight.css" rel="stylesheet">
   <link href="PRESENTATION_files/libs/revealjs/plugin/reveal-menu/menu.css" rel="stylesheet">
   <link href="PRESENTATION_files/libs/revealjs/plugin/reveal-menu/quarto-menu.css" rel="stylesheet">
@@ -279,7 +279,7 @@
 </section>
 <section id="paso-1-ceemdan-separa-el-caudal-en-modos" class="slide level2">
 <h2>Paso 1 · CEEMDAN separa el caudal en modos</h2>
-<img data-src="results/figures/decomposition.png" class="r-stretch" alt="Caudal de una ventana y sus seis IMF más el residuo.">
+<img data-src="results/figures/decomposition.png" class="r-stretch" style="margin: 0 auto; display: block;" alt="Caudal de una ventana y sus seis IMF más el residuo.">
 <div class="tiny muted">
 <p><span class="math inline">\(r_k=\langle M(r_{k-1}+\beta_{k-1}E_k(w^{(i)}))\rangle\)</span>, <span class="math inline">\(\mathrm{IMF}_k=r_{k-1}-r_k\)</span>: se agrega ruido blanco, se promedian 100 realizaciones y la suma de los modos reconstruye la señal exactamente.</p>
 </div>
@@ -432,14 +432,21 @@
 <p>media de <span class="math inline">\(V\)</span></p>
 </div>
 </div>
-<p><span class="math display">\[
-\bar{M}(\mathbf{q}_i,\mathbf{K})=\max_j\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}-\frac{1}{U}\sum_{j}\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}
-\]</span></p>
 <div class="compact">
-<p>Con <span class="math inline">\(c=5\)</span>: <strong>30 de 336</strong> queries en el encoder y 25 de 96 en el decoder causal. <span class="math inline">\(\bar{M}\)</span> aproxima la divergencia KL frente a una atención uniforme.</p>
+<p><span class="math display">\[
+\begin{aligned}
+M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\text{log-sum-exp}}-\frac{1}{L_K}\sum_{j=1}^{L_K} s_{ij},
+\qquad s_{ij}=\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}\\
+\max_j s_{ij} \;\le\; \ln\sum_j e^{s_{ij}} &amp;\;\le\; \max_j s_{ij}+\ln L_K \qquad \text{(Lema 1, Zhou et al., 2021)}\\
+\bar{M}(\mathbf{q}_i,\mathbf{K}) &amp;= \max_{j\in\mathcal{U}} s_{ij}-\frac{1}{U}\sum_{j\in\mathcal{U}} s_{ij}
+\end{aligned}
+\]</span></p>
+</div>
+<div class="compact">
+<p><span class="math inline">\(M\)</span> sale de la divergencia KL entre la atención de la query y una uniforme, pero el log-sum-exp exige todas las claves. Los autores demostraron que ese término está acotado por el máximo, así que lo reemplazan por el máximo sobre <span class="math inline">\(U=c\ln L\)</span> claves muestreadas: <span class="math inline">\(\bar{M}\)</span>. Con <span class="math inline">\(c=5\)</span>: <strong>30 de 336</strong> queries en el encoder y 25 de 96 en el decoder causal.</p>
 </div>
 <aside class="notes">
-<p>(≈1 min) Una query con atención casi uniforme no aporta: su salida es casi la media de V. Solo las queries “picudas” pagan el costo cuadrático.</p>
+<p>(≈1 min) Una query con atención casi uniforme no aporta: su salida es casi la media de V. Solo las queries “picudas” pagan el costo cuadrático. La cota garantiza que usar el máximo no se aleja más de ln L_K del log-sum-exp.</p>
 <style type="text/css">
         span.MJX_Assistive_MathML {
           position:absolute!important;
@@ -459,17 +466,16 @@
 </section>
 <section id="por-qué-el-protocolo-del-paper-filtra-el-futuro" class="slide level2">
 <h2>¿Por qué el protocolo del paper filtra el futuro?</h2>
-<div class="columns short-diagram">
-<div class="column" style="width:50%;">
-<p><strong>Paper</strong></p>
-<div class="cell" data-reveal="true" data-fig-width="5" data-fig-height="3.6" data-layout-align="default">
+<p><strong>Paper</strong>: se descompone y después se divide</p>
+<div class="wide-diagram">
+<div class="cell" data-reveal="true" data-layout-align="default">
 <div class="cell-output-display">
 <div>
 <p></p><figure class=""><p></p>
 <div>
-<pre class="mermaid mermaid-js">flowchart TD
-    A["Serie completa 2002–2005&lt;br/&gt;train + validación + test"] --&gt; B["CEEMDAN de toda la serie"]
-    B --&gt; C["Recién aquí se divide 7 : 1.5 : 1.5"]
+<pre class="mermaid mermaid-js">flowchart LR
+    A["Serie completa 2002–2005&lt;br/&gt;train + validación + test"] --&gt; B["CEEMDAN de&lt;br/&gt;toda la serie"]
+    B --&gt; C["Recién aquí se divide&lt;br/&gt;7 : 1.5 : 1.5"]
     C --&gt; D["El modelo recibe IMF(t),&lt;br/&gt;calculado con q(t+1 … T)"]
 </pre>
 </div>
@@ -477,29 +483,30 @@
 </div>
 </div>
 </div>
-</div><div class="column" style="width:50%;">
-<p><strong>Este trabajo</strong></p>
-<div class="cell" data-reveal="true" data-fig-width="5" data-fig-height="3.6" data-layout-align="default">
+</div>
+<p><strong>Este trabajo</strong>: cada ventana se descompone por separado</p>
+<div class="wide-diagram">
+<div class="cell" data-reveal="true" data-layout-align="default">
 <div class="cell-output-display">
 <div>
 <p></p><figure class=""><p></p>
 <div>
-<pre class="mermaid mermaid-js">flowchart TD
-    A["Cada ventana: solo sus 336 h pasadas"] --&gt; B["CEEMDAN de la ventana"]
-    B --&gt; C["IMF(t) usa solo q(… t)"]
-    C --&gt; D["Igual en train y en test"]
+<pre class="mermaid mermaid-js">flowchart LR
+    A["Cada ventana:&lt;br/&gt;solo sus 336 h pasadas"] --&gt; B["CEEMDAN de&lt;br/&gt;la ventana"]
+    B --&gt; C["IMF(t) usa&lt;br/&gt;solo q(… t)"]
+    C --&gt; D["Igual en train&lt;br/&gt;y en test"]
 </pre>
 </div>
 <p></p></figure><p></p>
 </div>
 </div>
 </div>
-</div></div>
+</div>
 <div class="compact">
-<p>EMD no es causal: las envolventes son splines que pasan por los máximos y mínimos <strong>a ambos lados</strong> de <em>t</em>, así que el valor de un IMF en <em>t</em> depende de lo que ocurre después.</p>
+<p>EMD no es causal: las envolventes pasan por máximos y mínimos <strong>a ambos lados</strong> de <em>t</em>, así que el IMF en <em>t</em> depende del futuro.</p>
 </div>
 <div class="key-message">
-<p>Descomponer antes de dividir le da al modelo una pista de los días que debe pronosticar. En un pronóstico real, y en el test de este laboratorio, esa pista no existe.</p>
+<p>Descomponer antes de dividir le da al modelo una pista que en test no existe.</p>
 </div>
 <aside class="notes">
 <p>(≈1 min) Punto clave del trabajo. Es el error clásico de los modelos “descomposición + ensamble” (Fang et al., 2019; Quilty y Adamowski, 2018). No podíamos replicar el protocolo aunque quisiéramos: en test solo tenemos la historia.</p>

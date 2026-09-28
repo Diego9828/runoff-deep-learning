@@ -5426,7 +5426,7 @@ r_k=\big\langle M\big(r_{k-1}+\beta_{k-1}E_k(w^{(i)})\big)\big\rangle_i,\qquad \
 <p></p><figure class="figure"><p></p>
 <div>
 <pre class="mermaid mermaid-js">flowchart TD
-    A[&quot;Cada ventana: solo sus 336 h pasadas&quot;] --&gt; B[&quot;CEEMDAN de la ventana&quot;]
+    A[&quot;Cada ventana:&lt;br/&gt;solo sus 336 h pasadas&quot;] --&gt; B[&quot;CEEMDAN de la ventana&quot;]
     B --&gt; C[&quot;IMF(t) usa solo q(… t)&quot;]
     C --&gt; D[&quot;Igual en train y en test&quot;]
 </pre>
@@ -5712,11 +5712,19 @@ r_k=\big\langle M\big(r_{k-1}+\beta_{k-1}E_k(w^{(i)})\big)\big\rangle_i,\qquad \
 <li>Decoder generativo de 1 capa: las últimas 48 h conocidas más 48 ceros; self-attention ProbSparse causal, cross-attention completa y proyección a 1 salida por hora.</li>
 <li><span class="math inline">\(d_{\text{model}}=256\)</span>, 8 cabezas, <span class="math inline">\(d_{ff}=1024\)</span>, GELU, dropout 0.1.</li>
 </ul>
-<p>La atención ProbSparse solo calcula atención completa para las <span class="math inline">\(u=c\ln L\)</span> queries más activas, medidas con</p>
+<p>La atención ProbSparse solo calcula atención completa para las <span class="math inline">\(u=c\ln L\)</span> queries más activas. La actividad de una query se mide con la divergencia KL entre su distribución de atención y una uniforme, que, sin constantes, es</p>
 <p><span class="math display">\[
-\bar{M}(\mathbf{q}_i,\mathbf{K})=\max_{j}\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}-\frac{1}{U}\sum_{j\in\mathcal{U}}\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}},
+M(\mathbf{q}_i,\mathbf{K})=\ln\sum_{j=1}^{L_K}e^{s_{ij}}-\frac{1}{L_K}\sum_{j=1}^{L_K}s_{ij},\qquad
+s_{ij}=\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}.
 \]</span></p>
-<p>que aproxima la divergencia KL entre la atención de la query y la distribución uniforme (<span class="math inline">\(U=c\ln L_K\)</span> claves muestreadas). Con <span class="math inline">\(c=5\)</span> son 30 de las 336 queries en el encoder y 25 de 96 en el decoder; las demás reciben la media de <span class="math inline">\(V\)</span> (media acumulada si es causal). Respecto del código oficial se corrigieron cuatro detalles: un solo muestreo de claves por pasada (evita un tensor de ~2.6 GB por capa), la media sobre las claves muestreadas, la media acumulada en lugar de la suma y sin el reshape <code>mix</code>. Un test verifica que ProbSparse coincide con la atención completa cuando <span class="math inline">\(u\ge L\)</span>.</p>
+<p>Calcular el log-sum-exp exige todas las claves. Zhou et al. (2021, Lema 1) demostraron que ese término está acotado por el máximo,</p>
+<p><span class="math display">\[
+\max_j s_{ij}\;\le\;\ln\sum_{j}e^{s_{ij}}\;\le\;\max_j s_{ij}+\ln L_K,
+\]</span></p>
+<p>así que lo reemplazan por el máximo sobre <span class="math inline">\(U=c\ln L_K\)</span> claves muestreadas:</p>
+<p><span class="math display">\[
+\bar{M}(\mathbf{q}_i,\mathbf{K})=\max_{j\in\mathcal{U}}s_{ij}-\frac{1}{U}\sum_{j\in\mathcal{U}}s_{ij}.
+\]</span> Con <span class="math inline">\(c=5\)</span> son 30 de las 336 queries en el encoder y 25 de 96 en el decoder; las demás reciben la media de <span class="math inline">\(V\)</span> (media acumulada si es causal). Respecto del código oficial se corrigieron cuatro detalles: un solo muestreo de claves por pasada (evita un tensor de ~2.6 GB por capa), la media sobre las claves muestreadas, la media acumulada en lugar de la suma y sin el reshape <code>mix</code>. Un test verifica que ProbSparse coincide con la atención completa cuando <span class="math inline">\(u\ge L\)</span>.</p>
 <p><strong>LSTM</strong> (<code>src/dmel/models.py</code>): 2 capas de 256 unidades (Tabla 1); el último estado oculto pasa por Linear(256 → 48).</p>
 <p><strong>Ensamble</strong> (<code>TwoBranch</code>): suma de las dos ramas, entrenada de punta a punta sobre el caudal futuro. Los componentes futuros no existen en inferencia, así que no se supervisa cada rama por separado. Total: 3.68 M parámetros.</p>
 </section>
