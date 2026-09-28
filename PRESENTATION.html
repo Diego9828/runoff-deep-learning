@@ -611,7 +611,7 @@
 </tr>
 <tr class="odd">
 <td>Batch 32, 100 épocas</td>
-<td>Batch 256, early stopping (máx. 30)</td>
+<td>Batch 256, 100 épocas, mejor época de validación</td>
 <td>250× más datos</td>
 </tr>
 </tbody>
@@ -641,13 +641,79 @@
 </ul>
 </div><div class="column" style="width:50%;">
 <ul>
-<li>Early stopping con paciencia 5: DMEL paró en la época 16 (mejor 11).</li>
-<li>RTX A6000 · ~2 min por época · 1 h 18 min en total.</li>
+<li>100 épocas, como el paper; se guarda la mejor época de validación.</li>
+<li>RTX A6000 · ~2 min por época · ~3.3 h por modelo.</li>
 </ul>
 </div></div>
 <img data-src="results/figures/training_curves.png" class="r-stretch" alt="Curvas de pérdida, NSE de validación y learning rate.">
 <aside class="notes">
-<p>(≈45 s) Una época nuestra tiene ~30 veces más actualizaciones que una del paper. La selección de la mejor época usa solo validación; test se evalúa una sola vez.</p>
+<p>(≈45 s) Una época nuestra tiene ~30 veces más actualizaciones que una del paper. La selección de la mejor época usa solo validación; test se evalúa una sola vez. Desde la época ~10 la validación empeora (sobreajuste) y hacia la 50 el learning rate llega a su piso: el modelo deja de cambiar.</p>
+<style type="text/css">
+        span.MJX_Assistive_MathML {
+          position:absolute!important;
+          clip: rect(1px, 1px, 1px, 1px);
+          padding: 1px 0 0 0!important;
+          border: 0!important;
+          height: 1px!important;
+          width: 1px!important;
+          overflow: hidden!important;
+          display:block!important;
+      }</style></aside>
+</section>
+<section id="cortaba-antes-de-tiempo-el-early-stopping" class="slide level2">
+<h2>¿Cortaba antes de tiempo el early stopping?</h2>
+<div class="small">
+<table class="caption-top">
+<colgroup>
+<col style="width: 15%">
+<col style="width: 21%">
+<col style="width: 21%">
+<col style="width: 21%">
+<col style="width: 21%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Modelo</th>
+<th style="text-align: right;">Early stopping: épocas / mejor</th>
+<th style="text-align: right;">NSE test</th>
+<th style="text-align: right;">100 épocas: mejor época</th>
+<th style="text-align: right;">NSE test</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>DMEL</td>
+<td style="text-align: right;">16 / 11</td>
+<td style="text-align: right;">0.629</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">0.614</td>
+</tr>
+<tr class="even">
+<td>Asignación invertida</td>
+<td style="text-align: right;">10 / 5</td>
+<td style="text-align: right;">0.629</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0.620</td>
+</tr>
+<tr class="odd">
+<td>Sin MRS</td>
+<td style="text-align: right;">10 / 5</td>
+<td style="text-align: right;">0.625</td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">0.629</td>
+</tr>
+</tbody>
+</table>
+</div>
+<ul>
+<li>Con 100 épocas se eligen <strong>las mismas épocas</strong> (5–11): el resto es sobreajuste. Costó ~13 h de GPU contra ~2 h.</li>
+<li>DMEL eligió la misma época con la misma pérdida de validación, y su NSE de test varió de 0.629 a 0.614: es el <strong>no determinismo de la GPU</strong>.</li>
+</ul>
+<div class="key-message">
+<p>La variación entre dos corridas iguales (~0.01–0.015) es del mismo tamaño que las diferencias entre modelos.</p>
+</div>
+<aside class="notes">
+<p>(≈1 min) Primero entrenamos con early stopping y luego repetimos todo con las 100 épocas del paper para descartar que hubiéramos cortado antes de tiempo. Reportamos la segunda ronda.</p>
 <style type="text/css">
         span.MJX_Assistive_MathML {
           position:absolute!important;
@@ -703,14 +769,20 @@
 <td>LSTM(caudal)</td>
 <td>¿Aporta la descomposición?</td>
 </tr>
+<tr class="odd">
+<td><strong>Variante: DMEL + caudal</strong></td>
+<td>Informer(HF)</td>
+<td>LSTM(LF + caudal)</td>
+<td>¿Recupera DMEL las primeras horas?</td>
+</tr>
 </tbody>
 </table>
 </div>
 <div class="key-message">
-<p>Las tres redes tienen la misma arquitectura y ~3.7 M parámetros: solo cambia la entrada o la asignación.</p>
+<p>Las cuatro redes tienen la misma arquitectura y ~3.7 M parámetros: solo cambia la entrada o la asignación.</p>
 </div>
 <aside class="notes">
-<p>(≈40 s) La ablación “sin MRS” es también nuestro modelo base entrenado.</p>
+<p>(≈40 s) La ablación “sin MRS” es también nuestro modelo base entrenado. La variante es propia, no del paper: responde a que DMEL perdía en las primeras horas en la primera ronda.</p>
 <style type="text/css">
         span.MJX_Assistive_MathML {
           position:absolute!important;
@@ -733,7 +805,7 @@
 <div class="columns">
 <div class="column" style="width:25%;">
 <div class="metric">
-<p><strong>0.629</strong> NSE mediano DMEL</p>
+<p><strong>0.614</strong> NSE mediano DMEL</p>
 </div>
 </div><div class="column" style="width:25%;">
 <div class="metric">
@@ -741,21 +813,22 @@
 </div>
 </div><div class="column" style="width:25%;">
 <div class="metric">
-<p><strong>343/508</strong> cuencas mejoran</p>
+<p><strong>348/508</strong> cuencas mejoran</p>
 </div>
 </div><div class="column" style="width:25%;">
 <div class="metric">
-<p><strong>0.41 vs 0.15</strong> NSE a 48 h</p>
+<p><strong>0.40 vs 0.15</strong> NSE a 48 h</p>
 </div>
 </div></div>
 <div class="small">
 <table class="caption-top">
 <colgroup>
-<col style="width: 15%">
-<col style="width: 21%">
-<col style="width: 21%">
-<col style="width: 21%">
-<col style="width: 21%">
+<col style="width: 13%">
+<col style="width: 17%">
+<col style="width: 17%">
+<col style="width: 17%">
+<col style="width: 17%">
+<col style="width: 17%">
 </colgroup>
 <thead>
 <tr class="header">
@@ -764,49 +837,55 @@
 <th style="text-align: right;"><strong>DMEL</strong></th>
 <th style="text-align: right;">Asignación invertida</th>
 <th style="text-align: right;">Sin MRS</th>
+<th style="text-align: right;">Variante</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
 <td>NSE mediano</td>
 <td style="text-align: right;">0.492</td>
-<td style="text-align: right;"><strong>0.629</strong></td>
+<td style="text-align: right;"><strong>0.614</strong></td>
+<td style="text-align: right;">0.620</td>
 <td style="text-align: right;">0.629</td>
-<td style="text-align: right;">0.625</td>
+<td style="text-align: right;">0.624</td>
 </tr>
 <tr class="even">
 <td>KGE mediano</td>
 <td style="text-align: right;">0.626</td>
-<td style="text-align: right;">0.673</td>
-<td style="text-align: right;">0.677</td>
-<td style="text-align: right;">0.681</td>
+<td style="text-align: right;">0.655</td>
+<td style="text-align: right;">0.672</td>
+<td style="text-align: right;">0.641</td>
+<td style="text-align: right;">0.693</td>
 </tr>
 <tr class="odd">
-<td>RMSE (mm/h)</td>
-<td style="text-align: right;">0.119</td>
-<td style="text-align: right;">0.101</td>
-<td style="text-align: right;">0.101</td>
-<td style="text-align: right;">0.100</td>
+<td>NSE 1 h / 24 h</td>
+<td style="text-align: right;">0.998 / 0.538</td>
+<td style="text-align: right;">0.943 / 0.649</td>
+<td style="text-align: right;">0.958 / 0.660</td>
+<td style="text-align: right;">0.984 / 0.656</td>
+<td style="text-align: right;">0.984 / 0.672</td>
 </tr>
 <tr class="even">
-<td>NSE 1 h / 24 h / 48 h</td>
-<td style="text-align: right;">0.998 / 0.538 / 0.150</td>
-<td style="text-align: right;">0.957 / 0.651 / 0.407</td>
-<td style="text-align: right;">0.953 / 0.675 / 0.412</td>
-<td style="text-align: right;">0.983 / 0.668 / 0.400</td>
+<td>NSE 48 h</td>
+<td style="text-align: right;">0.150</td>
+<td style="text-align: right;">0.403</td>
+<td style="text-align: right;">0.399</td>
+<td style="text-align: right;">0.413</td>
+<td style="text-align: right;">0.412</td>
 </tr>
 <tr class="odd">
 <td>Cuencas con NSE &lt; 0</td>
 <td style="text-align: right;">74</td>
-<td style="text-align: right;">39</td>
-<td style="text-align: right;">24</td>
+<td style="text-align: right;">37</td>
 <td style="text-align: right;">26</td>
+<td style="text-align: right;">36</td>
+<td style="text-align: right;">39</td>
 </tr>
 </tbody>
 </table>
 </div>
 <aside class="notes">
-<p>(≈1 min) DMEL supera claramente a la persistencia en el agregado (Wilcoxon p = 6e-19). Pero las tres redes son casi iguales entre sí. Validación da lo mismo (0.638 / 0.641 / 0.655 / 0.525), así que la selección por validación generaliza a test.</p>
+<p>(≈1 min) DMEL supera claramente a la persistencia en el agregado (Wilcoxon p = 1.6e-19). Las cuatro redes quedan cerca entre sí. Validación cuenta lo mismo (0.624 DMEL / 0.646 / 0.665 / 0.662 variante / 0.525 persistencia), así que la selección por validación generaliza a test.</p>
 <style type="text/css">
         span.MJX_Assistive_MathML {
           position:absolute!important;
@@ -823,10 +902,10 @@
 <h2>¿Cómo cae el desempeño con el horizonte?</h2>
 <img data-src="results/figures/nse_by_lead.png" class="r-stretch" alt="NSE mediano por horizonte de pronóstico.">
 <div class="key-message">
-<p>Hasta ~6 h gana copiar el último valor; desde ~8 h las redes ganan y a 48 h duplican con creces el NSE de la persistencia (0.41 contra 0.15).</p>
+<p>Hasta ~6 h gana copiar el último valor; desde ~7 h las redes ganan y a 48 h duplican con creces el NSE de la persistencia (~0.40 contra 0.15).</p>
 </div>
 <aside class="notes">
-<p>(≈1 min) En las primeras horas la red sin MRS es la mejor (0.983 a 1 h) porque ve el caudal crudo. DMEL solo ve componentes, cuyas últimas horas son las menos estables por el efecto de borde.</p>
+<p>(≈1 min) En las primeras horas dominan los dos modelos que ven el caudal crudo: sin MRS y la variante (0.984 a 1 h). DMEL solo ve componentes, cuyas últimas horas son las menos estables por el efecto de borde.</p>
 <style type="text/css">
         span.MJX_Assistive_MathML {
           position:absolute!important;
@@ -860,30 +939,36 @@
 <tbody>
 <tr class="odd">
 <td>DMEL (paper) vs Persistencia</td>
-<td>0.082</td>
-<td>343/508</td>
-<td>6.2e-19</td>
+<td>0.081</td>
+<td>348/508</td>
+<td>1.6e-19</td>
 </tr>
 <tr class="even">
-<td>DMEL (paper) vs Ablación: asignación invertida</td>
-<td>-0.00501</td>
-<td>238/508</td>
-<td>8.7e-02</td>
+<td>DMEL (paper) vs Variante: DMEL + caudal</td>
+<td>-0.00729</td>
+<td>221/508</td>
+<td>2.0e-04</td>
 </tr>
 <tr class="odd">
+<td>DMEL (paper) vs Ablación: asignación invertida</td>
+<td>-0.00549</td>
+<td>224/508</td>
+<td>4.5e-04</td>
+</tr>
+<tr class="even">
 <td>DMEL (paper) vs Ablación: sin MRS</td>
-<td>-0.0094</td>
-<td>209/508</td>
-<td>2.6e-05</td>
+<td>-0.00551</td>
+<td>231/508</td>
+<td>1.8e-03</td>
 </tr>
 </tbody>
 </table>
 </div>
 <div class="key-message">
-<p>Sin fuga de información, ninguno de los dos componentes centrales aporta: invertir la asignación no cambia nada (p = 0.087) y quitar el MRS mejora levemente (p = 2.6e-05).</p>
+<p>En las dos rondas, DMEL nunca supera a sus ablaciones: invertir la asignación o quitar el MRS da igual o levemente mejor. Las diferencias (≤ 0.015) están en el rango de la variación entre corridas.</p>
 </div>
 <aside class="notes">
-<p>(≈1 min) Wilcoxon pareado sobre el NSE de las 508 cuencas. La red sin MRS además converge antes (mejor época 5 contra 11) y llega a menor pérdida de validación (0.382 contra 0.399).</p>
+<p>(≈1 min) Wilcoxon pareado sobre el NSE de las 508 cuencas. Es significativo porque compara 508 pares, pero compara dos modelos entrenados concretos, no dos métodos: no incluye la variabilidad entre corridas. Lo robusto es la dirección, que se repite en las dos rondas.</p>
 <style type="text/css">
         span.MJX_Assistive_MathML {
           position:absolute!important;
@@ -920,11 +1005,71 @@
           display:block!important;
       }</style></aside>
 </section>
+<section id="variante-devolverle-el-caudal-a-dmel" class="slide level2">
+<h2>Variante: devolverle el caudal a DMEL</h2>
+<div class="columns">
+<div class="column" style="width:50%;">
+<p><strong>Qué cambia</strong></p>
+<ul>
+<li>El LSTM recibe el RIMF de baja frecuencia <strong>y</strong> el caudal observado.</li>
+<li>Todo lo demás es DMEL: mismo MRS, mismo Informer, misma suma.</li>
+</ul>
+</div><div class="column" style="width:50%;">
+<p><strong>Resultado en test</strong></p>
+<table class="caption-top">
+<thead>
+<tr class="header">
+<th></th>
+<th style="text-align: right;">DMEL</th>
+<th style="text-align: right;">Variante</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>NSE a 1 h</td>
+<td style="text-align: right;">0.943</td>
+<td style="text-align: right;"><strong>0.984</strong></td>
+</tr>
+<tr class="even">
+<td>NSE a 6 h</td>
+<td style="text-align: right;">0.907</td>
+<td style="text-align: right;"><strong>0.948</strong></td>
+</tr>
+<tr class="odd">
+<td>KGE mediano</td>
+<td style="text-align: right;">0.655</td>
+<td style="text-align: right;"><strong>0.693</strong></td>
+</tr>
+<tr class="even">
+<td>|EP| del pico</td>
+<td style="text-align: right;">41 %</td>
+<td style="text-align: right;"><strong>36 %</strong></td>
+</tr>
+</tbody>
+</table>
+</div></div>
+<div class="key-message">
+<p>Recupera las primeras horas y es el mejor en KGE, picos y entre 6 y 24 h. Pero su NSE mediano (0.624) iguala al modelo sin MRS: la ganancia viene del caudal crudo, no de la descomposición.</p>
+</div>
+<aside class="notes">
+<p>(≈1 min) A 6 h la variante (0.948) supera incluso a la persistencia (0.940). Wilcoxon contra DMEL: p = 2e-4.</p>
+<style type="text/css">
+        span.MJX_Assistive_MathML {
+          position:absolute!important;
+          clip: rect(1px, 1px, 1px, 1px);
+          padding: 1px 0 0 0!important;
+          border: 0!important;
+          height: 1px!important;
+          width: 1px!important;
+          overflow: hidden!important;
+          display:block!important;
+      }</style></aside>
+</section>
 <section id="las-crecidas" class="slide level2">
 <h2>Las crecidas</h2>
 <img data-src="results/figures/events.png" class="r-stretch" alt="Hidrogramas de las mayores crecidas de test.">
 <div class="compact">
-<p>Las mayores crecidas parten de caudal ~0: la lluvia que las provoca aún no cae y ningún modelo las anticipa. Si la subida ya empezó (cuenca 363), DMEL es el que más se acerca al pico (≈1.15 contra 2.2 mm/h).</p>
+<p>Las mayores crecidas parten de caudal ~0: la lluvia que las provoca aún no cae y ningún modelo las anticipa. Si la subida ya empezó (cuenca 363), la variante es la que más se acerca al pico (≈1.4 contra 2.2 mm/h), seguida de DMEL (≈1.15).</p>
 </div>
 <aside class="notes">
 <p>(≈45 s) Las variables meteorológicas futuras (y_aux) no están disponibles en inferencia; con lluvia pronosticada estas crecidas serían predecibles.</p>
@@ -944,7 +1089,7 @@
 <h2>¿Qué aporta cada rama?</h2>
 <img data-src="results/figures/branches.png" class="r-stretch" alt="Aporte del Informer y del LSTM en las crecidas.">
 <div class="compact">
-<p>Las ramas se compensan con desplazamientos casi constantes (+0.4 / −0.3). La crecida de la cuenca 363 la explica el <strong>LSTM</strong>, que también recibe la lluvia, no el Informer.</p>
+<p>Las ramas se compensan con desplazamientos casi constantes (+0.35 / −0.3). La crecida de la cuenca 363 la explica el <strong>LSTM</strong>, que también recibe la lluvia, no el Informer.</p>
 </div>
 <aside class="notes">
 <p>(≈45 s) Al entrenar sobre la suma, la división en aportes de alta y baja frecuencia no es identificable. La interpretación del paper (“el Informer captura los cambios bruscos”) no se sostiene aquí.</p>
@@ -970,8 +1115,8 @@
 </div></div>
 <div class="compact">
 <ul>
-<li><strong>Caudales bajos</strong>: la persistencia tiene 10 % de error relativo y las redes 44–60 %; DMEL es la mejor red.</li>
-<li><strong>Picos</strong>: todos los subestiman (EP mediano de −32 % en DMEL); el desfase baja de 19 h a 8 h.</li>
+<li><strong>Caudales bajos</strong>: la persistencia tiene 10 % de error relativo; las redes con MRS 47–49 % y la sin MRS 68 %.</li>
+<li><strong>Picos</strong>: todos los subestiman (EP mediano de −31 % a −40 %); el desfase baja de 19 h a 7–8 h.</li>
 </ul>
 </div>
 <aside class="notes">
@@ -992,21 +1137,25 @@
 <h2>Limitaciones</h2>
 <ul>
 <li>Sin el futuro, los componentes de las últimas horas son los menos estables (efecto de borde).</li>
-<li>DMEL no ve el caudal crudo: pierde contra la persistencia hasta ~6 h.</li>
+<li>DMEL no ve el caudal crudo: pierde contra la persistencia hasta ~6 h (la variante lo corrige).</li>
 <li>Una sola agrupación MRS para las 508 cuencas.</li>
 <li>Las ramas no se supervisan por separado: su aporte es una interpretación.</li>
-<li>Una semilla por modelo; la significancia se mide entre cuencas.</li>
+<li>Una semilla por modelo: la variación entre corridas (~0.01) es comparable a las diferencias entre modelos.</li>
 <li>Sin lluvia futura: las crecidas que aún no empiezan son casi impredecibles.</li>
 </ul>
 </section>
 <section id="conclusiones" class="slide level2">
 <h2>Conclusiones</h2>
+<div class="compact">
 <ol type="1">
 <li>Implementamos DMEL desde cero: CEEMDAN y sample entropy propios, Informer con ProbSparse y LSTM.</li>
 <li>Descomponer la serie completa, como el paper, filtra información del futuro; lo evitamos por ventana.</li>
-<li>DMEL supera a la persistencia desde ~8 h (0.41 contra 0.15 de NSE a 48 h; 343 de 508 cuencas).</li>
+<li>DMEL supera a la persistencia desde ~7 h (0.40 contra 0.15 de NSE a 48 h; 348 de 508 cuencas).</li>
 <li>Sin fuga, ni el MRS ni la asignación de frecuencias mejoran a la misma arquitectura con el caudal crudo.</li>
+<li>Devolverle el caudal observado a DMEL recupera las primeras horas y mejora KGE y picos.</li>
+<li>100 épocas eligen las mismas épocas que el early stopping: el resto es sobreajuste.</li>
 </ol>
+</div>
 <div class="key-message">
 <p>La idea de separar por frecuencias es elegante, pero en un pronóstico honesto (solo con el pasado) su ventaja desaparece; lo que más ayudaría es información del futuro que no tenemos: la lluvia pronosticada.</p>
 </div>
@@ -1051,25 +1200,27 @@
 </tr>
 <tr class="odd">
 <td>Entrenamiento</td>
-<td>Adam 3e-4, warmup 500, batch 256, máx. 30 épocas, paciencia 5, clip 1.0, TF32</td>
+<td>Adam 3e-4, warmup 500, batch 256, 100 épocas (mejor época de validación), clip 1.0, TF32</td>
 </tr>
 </tbody>
 </table>
 </section>
 <section id="apéndice-todas-las-métricas-de-test" class="slide level2 smaller" data-visibility="uncounted">
 <h2>Apéndice: todas las métricas de test</h2>
-<table class="caption-top">
+<table class="caption-top" style="width:100%;">
 <colgroup>
-<col style="width: 20%">
-<col style="width: 20%">
-<col style="width: 20%">
-<col style="width: 20%">
-<col style="width: 20%">
+<col style="width: 16%">
+<col style="width: 16%">
+<col style="width: 16%">
+<col style="width: 16%">
+<col style="width: 16%">
+<col style="width: 16%">
 </colgroup>
 <thead>
 <tr class="header">
 <th>métrica</th>
 <th>Persistencia</th>
+<th>Variante: DMEL + caudal</th>
 <th>DMEL (paper)</th>
 <th>Ablación: asignación invertida</th>
 <th>Ablación: sin MRS</th>
@@ -1079,20 +1230,23 @@
 <tr class="odd">
 <td>NSE_mediana</td>
 <td>0.492</td>
+<td>0.624</td>
+<td>0.614</td>
+<td>0.620</td>
 <td>0.629</td>
-<td>0.629</td>
-<td>0.625</td>
 </tr>
 <tr class="even">
 <td>KGE_mediana</td>
 <td>0.626</td>
-<td>0.673</td>
-<td>0.677</td>
-<td>0.681</td>
+<td>0.693</td>
+<td>0.655</td>
+<td>0.672</td>
+<td>0.641</td>
 </tr>
 <tr class="odd">
 <td>RMSE</td>
 <td>0.119</td>
+<td>0.100</td>
 <td>0.101</td>
 <td>0.101</td>
 <td>0.100</td>
@@ -1101,78 +1255,89 @@
 <td>MAE</td>
 <td>0.025</td>
 <td>0.024</td>
+<td>0.025</td>
 <td>0.024</td>
-<td>0.024</td>
+<td>0.025</td>
 </tr>
 <tr class="odd">
 <td>NSE_global</td>
 <td>0.496</td>
-<td>0.635</td>
+<td>0.639</td>
 <td>0.634</td>
+<td>0.636</td>
 <td>0.642</td>
 </tr>
 <tr class="even">
 <td>cuencas_NSE&lt;0</td>
 <td>74</td>
 <td>39</td>
-<td>24</td>
+<td>37</td>
 <td>26</td>
+<td>36</td>
 </tr>
 <tr class="odd">
 <td>EP_pico_mediana_%</td>
 <td>-48.849</td>
-<td>-32.218</td>
-<td>-38.983</td>
-<td>-31.491</td>
+<td>-31.088</td>
+<td>-33.618</td>
+<td>-40.037</td>
+<td>-33.946</td>
 </tr>
 <tr class="even">
 <td>EP_pico_abs_mediana_%</td>
 <td>48.908</td>
-<td>40.427</td>
-<td>43.150</td>
-<td>38.623</td>
+<td>36.398</td>
+<td>41.268</td>
+<td>44.779</td>
+<td>40.286</td>
 </tr>
 <tr class="odd">
 <td>desfase_pico_abs_mediana_h</td>
 <td>19</td>
+<td>7</td>
 <td>8</td>
 <td>8</td>
-<td>8</td>
+<td>7.500</td>
 </tr>
 <tr class="even">
 <td>NSE_1h</td>
 <td>0.998</td>
-<td>0.957</td>
-<td>0.953</td>
-<td>0.983</td>
+<td>0.984</td>
+<td>0.943</td>
+<td>0.958</td>
+<td>0.984</td>
 </tr>
 <tr class="odd">
 <td>NSE_6h</td>
 <td>0.940</td>
-<td>0.915</td>
-<td>0.916</td>
-<td>0.945</td>
+<td>0.948</td>
+<td>0.907</td>
+<td>0.919</td>
+<td>0.943</td>
 </tr>
 <tr class="even">
 <td>NSE_12h</td>
 <td>0.821</td>
-<td>0.839</td>
-<td>0.846</td>
-<td>0.864</td>
+<td>0.860</td>
+<td>0.840</td>
+<td>0.853</td>
+<td>0.857</td>
 </tr>
 <tr class="odd">
 <td>NSE_24h</td>
 <td>0.538</td>
-<td>0.651</td>
-<td>0.675</td>
-<td>0.668</td>
+<td>0.672</td>
+<td>0.649</td>
+<td>0.660</td>
+<td>0.656</td>
 </tr>
 <tr class="even">
 <td>NSE_48h</td>
 <td>0.150</td>
-<td>0.407</td>
 <td>0.412</td>
-<td>0.400</td>
+<td>0.403</td>
+<td>0.399</td>
+<td>0.413</td>
 </tr>
 </tbody>
 </table>
@@ -1205,34 +1370,44 @@
 </thead>
 <tbody>
 <tr class="odd">
-<td>DMEL (paper)</td>
-<td>3.677</td>
-<td>16</td>
+<td>Variante: DMEL + caudal</td>
+<td>3.678</td>
+<td>100</td>
 <td>11</td>
-<td>0.399</td>
-<td>0.635</td>
-<td>2.015</td>
-<td>0.537</td>
+<td>0.376</td>
+<td>0.662</td>
+<td>2.000</td>
+<td>3.334</td>
 </tr>
 <tr class="even">
-<td>Ablación: asignación invertida</td>
-<td>3.675</td>
-<td>10</td>
-<td>5</td>
-<td>0.390</td>
-<td>0.637</td>
-<td>1.915</td>
-<td>0.319</td>
+<td>DMEL (paper)</td>
+<td>3.677</td>
+<td>100</td>
+<td>11</td>
+<td>0.399</td>
+<td>0.618</td>
+<td>1.999</td>
+<td>3.332</td>
 </tr>
 <tr class="odd">
+<td>Ablación: asignación invertida</td>
+<td>3.675</td>
+<td>100</td>
+<td>5</td>
+<td>0.389</td>
+<td>0.645</td>
+<td>1.896</td>
+<td>3.160</td>
+</tr>
+<tr class="even">
 <td>Ablación: sin MRS</td>
 <td>3.671</td>
-<td>10</td>
-<td>5</td>
-<td>0.382</td>
-<td>0.655</td>
-<td>1.983</td>
-<td>0.331</td>
+<td>100</td>
+<td>7</td>
+<td>0.378</td>
+<td>0.665</td>
+<td>1.916</td>
+<td>3.193</td>
 </tr>
 </tbody>
 </table>
