@@ -125,7 +125,8 @@ blanco, se promedian 100 realizaciones y la suma de los modos reconstruye la se�
 
 ::: {.notes}
 (≈1 min) Explicar que cada IMF oscila a una escala de tiempo: IMF1 captura el ruido hora a hora y el
-residuo la tendencia. El color anticipa la decisión del MRS.
+residuo la tendencia. El color anticipa la decisión del MRS. Adelantar que CEEMDAN no es causal: esto
+será clave en la implementación.
 :::
 
 ## Paso 2 · Sample entropy mide la complejidad
@@ -255,7 +256,53 @@ queries "picudas" pagan el costo cuadrático.
 
 # Implementación
 
-## El paper descompone con el futuro
+## ¿Por qué el protocolo del paper filtra el futuro?
+
+::: {.columns .short-diagram}
+::: {.column width="50%"}
+**Paper**
+
+```{mermaid}
+%%| fig-width: 5
+%%| fig-height: 3.6
+flowchart TD
+    A["Serie completa 2002–2005<br/>train + validación + test"] --> B["CEEMDAN de toda la serie"]
+    B --> C["Recién aquí se divide 7 : 1.5 : 1.5"]
+    C --> D["El modelo recibe IMF(t),<br/>calculado con q(t+1 … T)"]
+```
+:::
+
+::: {.column width="50%"}
+**Este trabajo**
+
+```{mermaid}
+%%| fig-width: 5
+%%| fig-height: 3.6
+flowchart TD
+    A["Cada ventana: solo sus 336 h pasadas"] --> B["CEEMDAN de la ventana"]
+    B --> C["IMF(t) usa solo q(… t)"]
+    C --> D["Igual en train y en test"]
+```
+:::
+:::
+
+::: {.compact}
+EMD no es causal: las envolventes son splines que pasan por los máximos y mínimos **a ambos lados** de *t*,
+así que el valor de un IMF en *t* depende de lo que ocurre después.
+:::
+
+::: {.key-message}
+Descomponer antes de dividir le da al modelo una pista de los días que debe pronosticar. En un pronóstico
+real, y en el test de este laboratorio, esa pista no existe.
+:::
+
+::: {.notes}
+(≈1 min) Punto clave del trabajo. Es el error clásico de los modelos "descomposición + ensamble"
+(Fang et al., 2019; Quilty y Adamowski, 2018). No podíamos replicar el protocolo aunque quisiéramos:
+en test solo tenemos la historia.
+:::
+
+## La fuga, medida
 
 ![](results/figures/leakage.png){.r-stretch fig-alt="Cambio de los componentes al descomponer también el futuro."}
 
@@ -412,6 +459,27 @@ paper: responde a que DMEL perdía en las primeras horas en la primera ronda.
 
 # Resultados
 
+## ¿Cómo medimos?
+
+::: {.small}
+| Métrica | Qué mide | Ideal | Cómo se resume |
+|---|---|---:|---|
+| **NSE** | 1 − error² / varianza observada; 0 = predecir el promedio de la cuenca | 1 | Por cuenca → mediana de las 508 |
+| **KGE** | Correlación + variabilidad (σ) + sesgo (μ); castiga hidrogramas aplanados | 1 | Por cuenca → mediana |
+| **RMSE** | Error cuadrático medio, en mm/h | 0 | Todas las predicciones juntas (pesan las cuencas grandes) |
+| NSE por horizonte | NSE a 1, 6, 12, 24 y 48 h | 1 | Por cuenca → mediana |
+| EP y desfase del pico | Error del pico (%) y horas de atraso en crecidas (pico ≥ p95 de su cuenca) | 0 | Mediana |
+| Wilcoxon | ¿La diferencia de NSE, cuenca por cuenca, es significativa? | p < 0.05 | 508 pares |
+:::
+
+::: {.key-message}
+NSE, KGE y RMSE son las métricas del paper; las calculamos por cuenca para que las 508 pesen igual.
+:::
+
+::: {.notes}
+(≈45 s) Un NSE negativo significa que el modelo es peor que predecir el caudal promedio de la cuenca.
+:::
+
 ## Resultados en test
 
 ::: {.columns}
@@ -446,6 +514,7 @@ NSE a 48 h
 |---|---:|---:|---:|---:|---:|
 | NSE mediano | 0.492 | **0.614** | 0.620 | 0.629 | 0.624 |
 | KGE mediano | 0.626 | 0.655 | 0.672 | 0.641 | 0.693 |
+| RMSE (mm/h) | 0.119 | 0.101 | 0.101 | 0.100 | 0.100 |
 | NSE 1 h / 24 h | 0.998 / 0.538 | 0.943 / 0.649 | 0.958 / 0.660 | 0.984 / 0.656 | 0.984 / 0.672 |
 | NSE 48 h | 0.150 | 0.403 | 0.399 | 0.413 | 0.412 |
 | Cuencas con NSE < 0 | 74 | 37 | 26 | 36 | 39 |
@@ -534,6 +603,28 @@ iguala al modelo sin MRS: la ganancia viene del caudal crudo, no de la descompos
 ::: {.notes}
 (≈1 min) A 6 h la variante (0.948) supera incluso a la persistencia (0.940). Wilcoxon contra DMEL:
 p = 2e-4.
+:::
+
+## ¿Qué modelo es mejor?
+
+::: {.small}
+| Modelo | Qué es | NSE ↑ | KGE ↑ | RMSE ↓ | NSE 1 h ↑ | NSE 48 h ↑ | \|EP\| ↓ | Veredicto |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| Persistencia | Copiar el último valor | 0.492 | 0.626 | 0.119 | **0.998** | 0.150 | 49 % | Solo gana en 1–6 h |
+| **DMEL** | Paper | 0.614 | 0.655 | 0.101 | 0.943 | 0.403 | 41 % | La red más débil |
+| Asignación invertida | Ablación 1 | 0.620 | 0.672 | 0.101 | 0.958 | 0.399 | 45 % | ≈ DMEL |
+| Sin MRS | Ablación 2 | **0.629** | 0.641 | **0.100** | **0.984** | **0.413** | 40 % | Mejor NSE, sin descomponer |
+| DMEL + caudal | Variante | 0.624 | **0.693** | **0.100** | **0.984** | 0.412 | **36 %** | La más equilibrada |
+:::
+
+::: {.key-message}
+Quitarle a DMEL sus componentes centrales no lo empeora. La mejor versión es la que le devuelve el caudal
+observado, y las diferencias entre redes (~0.01) están dentro de la variación entre corridas.
+:::
+
+::: {.notes}
+(≈1 min) NSE y KGE son medianas entre cuencas; RMSE en mm/h. Las cuatro redes superan ampliamente a la
+persistencia desde ~7 h.
 :::
 
 ## Las crecidas

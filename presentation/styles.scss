@@ -170,3 +170,7 @@ $presentation-block-margin: 14px;
 .reveal .notes {
   display: none;
 }
+
+.reveal .short-diagram svg {
+  max-height: 250px !important;
+}

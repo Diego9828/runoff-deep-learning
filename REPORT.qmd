@@ -98,8 +98,32 @@ MRS frente a CEEMDAN sin reagrupar (Sec. 5.1) y la asignación invertida LSTM→
 ### 3.1 Descomposición por ventana: sin información del futuro
 
 El paper descompone **la serie completa** y después la divide en train/validación/test. Como EMD no es
-causal (las envolventes usan extremos futuros), cada componente del pasado "ve" el futuro. Aquí cada
-ventana se descompone **solo con sus 336 h de historia**, igual que en test, donde no existe el futuro.
+causal (las envolventes son splines que pasan por los extremos a ambos lados de *t*), el valor de cada
+componente en *t* depende de lo que ocurre después: el modelo recibe una pista de los días que debe
+pronosticar. Aquí cada ventana se descompone **solo con sus 336 h de historia**, igual que en test, donde
+no existe el futuro.
+
+::: {layout-ncol=2}
+```{mermaid}
+%%| fig-cap: "Paper: se descompone y después se divide."
+flowchart TD
+    A["Serie completa 2002–2005<br/>train + validación + test"] --> B["CEEMDAN de toda la serie"]
+    B --> C["Recién aquí se divide 7 : 1.5 : 1.5"]
+    C --> D["El modelo recibe IMF(t),<br/>calculado con q(t+1 … T)"]
+```
+
+```{mermaid}
+%%| fig-cap: "Este trabajo: cada ventana se descompone por separado."
+flowchart TD
+    A["Cada ventana: solo sus 336 h pasadas"] --> B["CEEMDAN de la ventana"]
+    B --> C["IMF(t) usa solo q(… t)"]
+    C --> D["Igual en train y en test"]
+```
+:::
+
+Es el error clásico de los modelos de "descomposición + ensamble" (Fang et al., 2019; Quilty y Adamowski,
+2018). Para medirlo, cada ventana de validación se descompone de dos formas: solo con su historia, como
+en este trabajo, y con su historia más las 48 h futuras, como haría el protocolo del paper.
 
 ![Cambio de los componentes en las últimas 48 h de historia cuando también se descompone el futuro (protocolo del paper), comparado con cambiar solo el ruido de CEEMDAN.](results/figures/leakage.png)
 
@@ -292,10 +316,19 @@ $$
 \mathrm{KGE}=1-\sqrt{(r-1)^2+(\alpha-1)^2+(\beta-1)^2},
 $$
 
-con $r$ la correlación, $\alpha=\sigma_{\hat{q}}/\sigma_q$ y $\beta=\mu_{\hat{q}}/\mu_q$.
+con $r$ la correlación, $\alpha=\sigma_{\hat{q}}/\sigma_q$ y $\beta=\mu_{\hat{q}}/\mu_q$, y
 
+$$
+\mathrm{RMSE}=\sqrt{\frac{1}{n}\sum_t (q_t-\hat{q}_t)^2},\qquad \mathrm{MAE}=\frac{1}{n}\sum_t\lvert q_t-\hat{q}_t\rvert
+\quad\text{(mm/h)}.
+$$
+
+- NSE, KGE y RMSE son las tres métricas del paper. NSE vale 1 si el pronóstico es perfecto, 0 si es tan
+  bueno como predecir el caudal promedio y es negativo si es peor. KGE también vale 1 en el óptimo y
+  castiga los hidrogramas aplanados ($\alpha<1$) y el sesgo ($\beta\neq1$).
 - NSE y KGE se calculan **por cuenca** (todas sus ventanas y horizontes) y se resume con la **mediana entre
-  cuencas**. RMSE y MAE se agregan sobre todas las predicciones.
+  cuencas**, para que las 508 pesen igual. RMSE y MAE se agregan sobre todas las predicciones, así que los
+  dominan las cuencas y crecidas grandes.
 - NSE por horizonte (1–48 h), como el análisis multi-paso del paper.
 - Crecidas: ventanas cuyo pico observado supera el cuantil 0.95 de su cuenca. Error del pico
   $\mathrm{EP}=(\hat{q}_{\max}-q_{\max})/q_{\max}\times100\,\%$ y desfase del pico en horas (paper, Sec. 5.5).
@@ -355,6 +388,21 @@ una mejora medible en este problema. Establecer diferencias de 0.01 exigiría va
 La variante confirma dónde está el problema: al devolverle al LSTM el caudal observado, DMEL recupera
 las primeras horas. Pero su NSE mediano (0.624) queda al nivel del modelo sin MRS (0.629): la ganancia
 viene del caudal crudo, no de la descomposición.
+
+### 7.4 ¿Qué modelo es mejor?
+
+| Modelo | Qué es | NSE mediano ↑ | KGE ↑ | RMSE (mm/h) ↓ | NSE 1 h ↑ | NSE 48 h ↑ | \|EP\| pico ↓ | Veredicto |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| Persistencia | Copiar el último valor | 0.492 | 0.626 | 0.119 | **0.998** | 0.150 | 49 % | Solo gana en 1–6 h |
+| **DMEL** | Método del paper | 0.614 | 0.655 | 0.101 | 0.943 | 0.403 | 41 % | La red más débil |
+| Asignación invertida | Ablación 1 | 0.620 | 0.672 | 0.101 | 0.958 | 0.399 | 45 % | ≈ DMEL |
+| Sin MRS | Ablación 2 | **0.629** | 0.641 | **0.100** | **0.984** | **0.413** | 40 % | Mejor NSE, sin descomponer |
+| DMEL + caudal | Variante propia | 0.624 | **0.693** | **0.100** | **0.984** | 0.412 | **36 %** | La más equilibrada |
+
+La variante es el mejor modelo en conjunto: el mejor KGE, el mejor error de pico y el mejor NSE entre 6 y
+24 h, y empata en RMSE y a 1 h. Frente a sus ablaciones, DMEL es la red más débil: quitarle el MRS o
+invertir la asignación no lo empeora. Todas las diferencias entre redes (~0.01) están dentro de la
+variación entre corridas; la brecha con la persistencia a partir de ~7 h, en cambio, es grande y robusta.
 
 **¿Por qué el MRS no ayuda aquí si en el paper sí?**
 
@@ -479,3 +527,4 @@ código y documentación. El grupo revisó y validó las decisiones de implement
 - Richman, J. S., Moorman, J. R. (2000). Physiological time-series analysis using approximate entropy and sample entropy. *Am. J. Physiol. Heart Circ. Physiol.*, 278(6).
 - Kratzert, F. et al. (2019). Towards learning universal, regional, and local hydrological behaviors via machine learning applied to large-sample datasets. *HESS*, 23, 5089–5110.
 - Fang, W. et al. (2019). Examining the applicability of different sampling techniques in the development of decomposition-based streamflow forecasting models. *Journal of Hydrology*, 568, 534–550.
+- Quilty, J., Adamowski, J. (2018). Addressing the incorrect usage of wavelet-based hydrological and water resources forecasting models for real-world applications with best practices and a new forecasting framework. *Journal of Hydrology*, 563, 336–353.
