@@ -28,7 +28,7 @@
       vertical-align: middle;
     }
   </style>
-  <link rel="stylesheet" href="PRESENTATION_files/libs/revealjs/dist/theme/quarto-4d67ad5367a53a0a25c6066a891a4d01.css">
+  <link rel="stylesheet" href="PRESENTATION_files/libs/revealjs/dist/theme/quarto-7fa87eb07e15c839123b329e75985175.css">
   <link href="PRESENTATION_files/libs/revealjs/plugin/quarto-line-highlight/line-highlight.css" rel="stylesheet">
   <link href="PRESENTATION_files/libs/revealjs/plugin/reveal-menu/menu.css" rel="stylesheet">
   <link href="PRESENTATION_files/libs/revealjs/plugin/reveal-menu/quarto-menu.css" rel="stylesheet">
@@ -284,7 +284,7 @@
 <p><span class="math inline">\(r_k=\langle M(r_{k-1}+\beta_{k-1}E_k(w^{(i)}))\rangle\)</span>, <span class="math inline">\(\mathrm{IMF}_k=r_{k-1}-r_k\)</span>: se agrega ruido blanco, se promedian 100 realizaciones y la suma de los modos reconstruye la señal exactamente.</p>
 </div>
 <aside class="notes">
-<p>(≈1 min) Explicar que cada IMF oscila a una escala de tiempo: IMF1 captura el ruido hora a hora y el residuo la tendencia. El color anticipa la decisión del MRS.</p>
+<p>(≈1 min) Explicar que cada IMF oscila a una escala de tiempo: IMF1 captura el ruido hora a hora y el residuo la tendencia. El color anticipa la decisión del MRS. Adelantar que CEEMDAN no es causal: esto será clave en la implementación.</p>
 <style type="text/css">
         span.MJX_Assistive_MathML {
           position:absolute!important;
@@ -457,8 +457,66 @@
 <h1>Implementación</h1>
 
 </section>
-<section id="el-paper-descompone-con-el-futuro" class="slide level2">
-<h2>El paper descompone con el futuro</h2>
+<section id="por-qué-el-protocolo-del-paper-filtra-el-futuro" class="slide level2">
+<h2>¿Por qué el protocolo del paper filtra el futuro?</h2>
+<div class="columns short-diagram">
+<div class="column" style="width:50%;">
+<p><strong>Paper</strong></p>
+<div class="cell" data-reveal="true" data-fig-width="5" data-fig-height="3.6" data-layout-align="default">
+<div class="cell-output-display">
+<div>
+<p></p><figure class=""><p></p>
+<div>
+<pre class="mermaid mermaid-js">flowchart TD
+    A["Serie completa 2002–2005&lt;br/&gt;train + validación + test"] --&gt; B["CEEMDAN de toda la serie"]
+    B --&gt; C["Recién aquí se divide 7 : 1.5 : 1.5"]
+    C --&gt; D["El modelo recibe IMF(t),&lt;br/&gt;calculado con q(t+1 … T)"]
+</pre>
+</div>
+<p></p></figure><p></p>
+</div>
+</div>
+</div>
+</div><div class="column" style="width:50%;">
+<p><strong>Este trabajo</strong></p>
+<div class="cell" data-reveal="true" data-fig-width="5" data-fig-height="3.6" data-layout-align="default">
+<div class="cell-output-display">
+<div>
+<p></p><figure class=""><p></p>
+<div>
+<pre class="mermaid mermaid-js">flowchart TD
+    A["Cada ventana: solo sus 336 h pasadas"] --&gt; B["CEEMDAN de la ventana"]
+    B --&gt; C["IMF(t) usa solo q(… t)"]
+    C --&gt; D["Igual en train y en test"]
+</pre>
+</div>
+<p></p></figure><p></p>
+</div>
+</div>
+</div>
+</div></div>
+<div class="compact">
+<p>EMD no es causal: las envolventes son splines que pasan por los máximos y mínimos <strong>a ambos lados</strong> de <em>t</em>, así que el valor de un IMF en <em>t</em> depende de lo que ocurre después.</p>
+</div>
+<div class="key-message">
+<p>Descomponer antes de dividir le da al modelo una pista de los días que debe pronosticar. En un pronóstico real, y en el test de este laboratorio, esa pista no existe.</p>
+</div>
+<aside class="notes">
+<p>(≈1 min) Punto clave del trabajo. Es el error clásico de los modelos “descomposición + ensamble” (Fang et al., 2019; Quilty y Adamowski, 2018). No podíamos replicar el protocolo aunque quisiéramos: en test solo tenemos la historia.</p>
+<style type="text/css">
+        span.MJX_Assistive_MathML {
+          position:absolute!important;
+          clip: rect(1px, 1px, 1px, 1px);
+          padding: 1px 0 0 0!important;
+          border: 0!important;
+          height: 1px!important;
+          width: 1px!important;
+          overflow: hidden!important;
+          display:block!important;
+      }</style></aside>
+</section>
+<section id="la-fuga-medida" class="slide level2">
+<h2>La fuga, medida</h2>
 <img data-src="results/figures/leakage.png" class="r-stretch" alt="Cambio de los componentes al descomponer también el futuro.">
 <div class="key-message">
 <p>El paper aplica CEEMDAN a la serie completa y luego la divide: los componentes del pasado “ven” el futuro. Nosotros descomponemos cada ventana solo con su historia.</p>
@@ -800,6 +858,81 @@
 <h1>Resultados</h1>
 
 </section>
+<section id="cómo-medimos" class="slide level2">
+<h2>¿Cómo medimos?</h2>
+<div class="small">
+<table class="caption-top">
+<colgroup>
+<col style="width: 23%">
+<col style="width: 23%">
+<col style="width: 30%">
+<col style="width: 23%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Métrica</th>
+<th>Qué mide</th>
+<th style="text-align: right;">Ideal</th>
+<th>Cómo se resume</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>NSE</strong></td>
+<td>1 − error² / varianza observada; 0 = predecir el promedio de la cuenca</td>
+<td style="text-align: right;">1</td>
+<td>Por cuenca → mediana de las 508</td>
+</tr>
+<tr class="even">
+<td><strong>KGE</strong></td>
+<td>Correlación + variabilidad (σ) + sesgo (μ); castiga hidrogramas aplanados</td>
+<td style="text-align: right;">1</td>
+<td>Por cuenca → mediana</td>
+</tr>
+<tr class="odd">
+<td><strong>RMSE</strong></td>
+<td>Error cuadrático medio, en mm/h</td>
+<td style="text-align: right;">0</td>
+<td>Todas las predicciones juntas (pesan las cuencas grandes)</td>
+</tr>
+<tr class="even">
+<td>NSE por horizonte</td>
+<td>NSE a 1, 6, 12, 24 y 48 h</td>
+<td style="text-align: right;">1</td>
+<td>Por cuenca → mediana</td>
+</tr>
+<tr class="odd">
+<td>EP y desfase del pico</td>
+<td>Error del pico (%) y horas de atraso en crecidas (pico ≥ p95 de su cuenca)</td>
+<td style="text-align: right;">0</td>
+<td>Mediana</td>
+</tr>
+<tr class="even">
+<td>Wilcoxon</td>
+<td>¿La diferencia de NSE, cuenca por cuenca, es significativa?</td>
+<td style="text-align: right;">p &lt; 0.05</td>
+<td>508 pares</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="key-message">
+<p>NSE, KGE y RMSE son las métricas del paper; las calculamos por cuenca para que las 508 pesen igual.</p>
+</div>
+<aside class="notes">
+<p>(≈45 s) Un NSE negativo significa que el modelo es peor que predecir el caudal promedio de la cuenca.</p>
+<style type="text/css">
+        span.MJX_Assistive_MathML {
+          position:absolute!important;
+          clip: rect(1px, 1px, 1px, 1px);
+          padding: 1px 0 0 0!important;
+          border: 0!important;
+          height: 1px!important;
+          width: 1px!important;
+          overflow: hidden!important;
+          display:block!important;
+      }</style></aside>
+</section>
 <section id="resultados-en-test" class="slide level2">
 <h2>Resultados en test</h2>
 <div class="columns">
@@ -858,6 +991,14 @@
 <td style="text-align: right;">0.693</td>
 </tr>
 <tr class="odd">
+<td>RMSE (mm/h)</td>
+<td style="text-align: right;">0.119</td>
+<td style="text-align: right;">0.101</td>
+<td style="text-align: right;">0.101</td>
+<td style="text-align: right;">0.100</td>
+<td style="text-align: right;">0.100</td>
+</tr>
+<tr class="even">
 <td>NSE 1 h / 24 h</td>
 <td style="text-align: right;">0.998 / 0.538</td>
 <td style="text-align: right;">0.943 / 0.649</td>
@@ -865,7 +1006,7 @@
 <td style="text-align: right;">0.984 / 0.656</td>
 <td style="text-align: right;">0.984 / 0.672</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>NSE 48 h</td>
 <td style="text-align: right;">0.150</td>
 <td style="text-align: right;">0.403</td>
@@ -873,7 +1014,7 @@
 <td style="text-align: right;">0.413</td>
 <td style="text-align: right;">0.412</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>Cuencas con NSE &lt; 0</td>
 <td style="text-align: right;">74</td>
 <td style="text-align: right;">37</td>
@@ -1053,6 +1194,110 @@
 </div>
 <aside class="notes">
 <p>(≈1 min) A 6 h la variante (0.948) supera incluso a la persistencia (0.940). Wilcoxon contra DMEL: p = 2e-4.</p>
+<style type="text/css">
+        span.MJX_Assistive_MathML {
+          position:absolute!important;
+          clip: rect(1px, 1px, 1px, 1px);
+          padding: 1px 0 0 0!important;
+          border: 0!important;
+          height: 1px!important;
+          width: 1px!important;
+          overflow: hidden!important;
+          display:block!important;
+      }</style></aside>
+</section>
+<section id="qué-modelo-es-mejor" class="slide level2">
+<h2>¿Qué modelo es mejor?</h2>
+<div class="small">
+<table class="caption-top">
+<colgroup>
+<col style="width: 9%">
+<col style="width: 9%">
+<col style="width: 12%">
+<col style="width: 12%">
+<col style="width: 12%">
+<col style="width: 12%">
+<col style="width: 12%">
+<col style="width: 12%">
+<col style="width: 9%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Modelo</th>
+<th>Qué es</th>
+<th style="text-align: right;">NSE ↑</th>
+<th style="text-align: right;">KGE ↑</th>
+<th style="text-align: right;">RMSE ↓</th>
+<th style="text-align: right;">NSE 1 h ↑</th>
+<th style="text-align: right;">NSE 48 h ↑</th>
+<th style="text-align: right;">|EP| ↓</th>
+<th>Veredicto</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Persistencia</td>
+<td>Copiar el último valor</td>
+<td style="text-align: right;">0.492</td>
+<td style="text-align: right;">0.626</td>
+<td style="text-align: right;">0.119</td>
+<td style="text-align: right;"><strong>0.998</strong></td>
+<td style="text-align: right;">0.150</td>
+<td style="text-align: right;">49 %</td>
+<td>Solo gana en 1–6 h</td>
+</tr>
+<tr class="even">
+<td><strong>DMEL</strong></td>
+<td>Paper</td>
+<td style="text-align: right;">0.614</td>
+<td style="text-align: right;">0.655</td>
+<td style="text-align: right;">0.101</td>
+<td style="text-align: right;">0.943</td>
+<td style="text-align: right;">0.403</td>
+<td style="text-align: right;">41 %</td>
+<td>La red más débil</td>
+</tr>
+<tr class="odd">
+<td>Asignación invertida</td>
+<td>Ablación 1</td>
+<td style="text-align: right;">0.620</td>
+<td style="text-align: right;">0.672</td>
+<td style="text-align: right;">0.101</td>
+<td style="text-align: right;">0.958</td>
+<td style="text-align: right;">0.399</td>
+<td style="text-align: right;">45 %</td>
+<td>≈ DMEL</td>
+</tr>
+<tr class="even">
+<td>Sin MRS</td>
+<td>Ablación 2</td>
+<td style="text-align: right;"><strong>0.629</strong></td>
+<td style="text-align: right;">0.641</td>
+<td style="text-align: right;"><strong>0.100</strong></td>
+<td style="text-align: right;"><strong>0.984</strong></td>
+<td style="text-align: right;"><strong>0.413</strong></td>
+<td style="text-align: right;">40 %</td>
+<td>Mejor NSE, sin descomponer</td>
+</tr>
+<tr class="odd">
+<td>DMEL + caudal</td>
+<td>Variante</td>
+<td style="text-align: right;">0.624</td>
+<td style="text-align: right;"><strong>0.693</strong></td>
+<td style="text-align: right;"><strong>0.100</strong></td>
+<td style="text-align: right;"><strong>0.984</strong></td>
+<td style="text-align: right;">0.412</td>
+<td style="text-align: right;"><strong>36 %</strong></td>
+<td>La más equilibrada</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="key-message">
+<p>Quitarle a DMEL sus componentes centrales no lo empeora. La mejor versión es la que le devuelve el caudal observado, y las diferencias entre redes (~0.01) están dentro de la variación entre corridas.</p>
+</div>
+<aside class="notes">
+<p>(≈1 min) NSE y KGE son medianas entre cuencas; RMSE en mm/h. Las cuatro redes superan ampliamente a la persistencia desde ~7 h.</p>
 <style type="text/css">
         span.MJX_Assistive_MathML {
           position:absolute!important;
