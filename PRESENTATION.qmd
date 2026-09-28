@@ -337,7 +337,7 @@ con la métrica NSE.
 | 7 días → 1–7 días | 336 h → 48 h | Enunciado del laboratorio |
 | Embedding de fechas | Omitido | No hay fechas |
 | MSE | NSE\* + 2 estáticos | Escalas muy distintas |
-| Batch 32, 100 épocas | Batch 256, early stopping (máx. 30) | 250× más datos |
+| Batch 32, 100 épocas | Batch 256, 100 épocas, mejor época de validación | 250× más datos |
 :::
 
 ::: {.notes}
@@ -354,8 +354,8 @@ frecuencia, LSTM para baja y suma de las ramas.
 :::
 
 ::: {.column width="50%"}
-- Early stopping con paciencia 5: DMEL paró en la época 16 (mejor 11).
-- RTX A6000 · ~2 min por época · 1 h 18 min en total.
+- 100 épocas, como el paper; se guarda la mejor época de validación.
+- RTX A6000 · ~2 min por época · ~3.3 h por modelo.
 :::
 :::
 
@@ -363,7 +363,30 @@ frecuencia, LSTM para baja y suma de las ramas.
 
 ::: {.notes}
 (≈45 s) Una época nuestra tiene ~30 veces más actualizaciones que una del paper. La selección de la mejor
-época usa solo validación; test se evalúa una sola vez.
+época usa solo validación; test se evalúa una sola vez. Desde la época ~10 la validación empeora
+(sobreajuste) y hacia la 50 el learning rate llega a su piso: el modelo deja de cambiar.
+:::
+
+## ¿Cortaba antes de tiempo el early stopping?
+
+::: {.small}
+| Modelo | Early stopping: épocas / mejor | NSE test | 100 épocas: mejor época | NSE test |
+|---|---:|---:|---:|---:|
+| DMEL | 16 / 11 | 0.629 | 11 | 0.614 |
+| Asignación invertida | 10 / 5 | 0.629 | 5 | 0.620 |
+| Sin MRS | 10 / 5 | 0.625 | 7 | 0.629 |
+:::
+
+- Con 100 épocas se eligen **las mismas épocas** (5–11): el resto es sobreajuste. Costó ~13 h de GPU contra ~2 h.
+- DMEL eligió la misma época con la misma pérdida de validación, y su NSE de test varió de 0.629 a 0.614: es el **no determinismo de la GPU**.
+
+::: {.key-message}
+La variación entre dos corridas iguales (~0.01–0.015) es del mismo tamaño que las diferencias entre modelos.
+:::
+
+::: {.notes}
+(≈1 min) Primero entrenamos con early stopping y luego repetimos todo con las 100 épocas del paper para
+descartar que hubiéramos cortado antes de tiempo. Reportamos la segunda ronda.
 :::
 
 ## ¿Qué comparamos?
@@ -375,14 +398,16 @@ frecuencia, LSTM para baja y suma de las ramas.
 | **DMEL** | Informer(HF) | LSTM(LF) | Propuesta del paper |
 | **Asignación invertida** | LSTM(HF) | Informer(LF) | ¿Importa qué modelo ve cada frecuencia? |
 | **Sin MRS** | Informer(caudal) | LSTM(caudal) | ¿Aporta la descomposición? |
+| **Variante: DMEL + caudal** | Informer(HF) | LSTM(LF + caudal) | ¿Recupera DMEL las primeras horas? |
 :::
 
 ::: {.key-message}
-Las tres redes tienen la misma arquitectura y ~3.7 M parámetros: solo cambia la entrada o la asignación.
+Las cuatro redes tienen la misma arquitectura y ~3.7 M parámetros: solo cambia la entrada o la asignación.
 :::
 
 ::: {.notes}
-(≈40 s) La ablación "sin MRS" es también nuestro modelo base entrenado.
+(≈40 s) La ablación "sin MRS" es también nuestro modelo base entrenado. La variante es propia, no del
+paper: responde a que DMEL perdía en las primeras horas en la primera ronda.
 :::
 
 # Resultados
@@ -392,7 +417,7 @@ Las tres redes tienen la misma arquitectura y ~3.7 M parámetros: solo cambia la
 ::: {.columns}
 ::: {.column width="25%"}
 <div class="metric">
-<strong>0.629</strong>
+<strong>0.614</strong>
 NSE mediano DMEL
 </div>
 :::
@@ -404,32 +429,32 @@ persistencia
 :::
 ::: {.column width="25%"}
 <div class="metric">
-<strong>343/508</strong>
+<strong>348/508</strong>
 cuencas mejoran
 </div>
 :::
 ::: {.column width="25%"}
 <div class="metric">
-<strong>0.41 vs 0.15</strong>
+<strong>0.40 vs 0.15</strong>
 NSE a 48 h
 </div>
 :::
 :::
 
 ::: {.small}
-| Test | Persistencia | **DMEL** | Asignación invertida | Sin MRS |
-|---|---:|---:|---:|---:|
-| NSE mediano | 0.492 | **0.629** | 0.629 | 0.625 |
-| KGE mediano | 0.626 | 0.673 | 0.677 | 0.681 |
-| RMSE (mm/h) | 0.119 | 0.101 | 0.101 | 0.100 |
-| NSE 1 h / 24 h / 48 h | 0.998 / 0.538 / 0.150 | 0.957 / 0.651 / 0.407 | 0.953 / 0.675 / 0.412 | 0.983 / 0.668 / 0.400 |
-| Cuencas con NSE < 0 | 74 | 39 | 24 | 26 |
+| Test | Persistencia | **DMEL** | Asignación invertida | Sin MRS | Variante |
+|---|---:|---:|---:|---:|---:|
+| NSE mediano | 0.492 | **0.614** | 0.620 | 0.629 | 0.624 |
+| KGE mediano | 0.626 | 0.655 | 0.672 | 0.641 | 0.693 |
+| NSE 1 h / 24 h | 0.998 / 0.538 | 0.943 / 0.649 | 0.958 / 0.660 | 0.984 / 0.656 | 0.984 / 0.672 |
+| NSE 48 h | 0.150 | 0.403 | 0.399 | 0.413 | 0.412 |
+| Cuencas con NSE < 0 | 74 | 37 | 26 | 36 | 39 |
 :::
 
 ::: {.notes}
-(≈1 min) DMEL supera claramente a la persistencia en el agregado (Wilcoxon p = 6e-19). Pero las tres redes
-son casi iguales entre sí. Validación da lo mismo (0.638 / 0.641 / 0.655 / 0.525), así que la selección
-por validación generaliza a test.
+(≈1 min) DMEL supera claramente a la persistencia en el agregado (Wilcoxon p = 1.6e-19). Las cuatro redes
+quedan cerca entre sí. Validación cuenta lo mismo (0.624 DMEL / 0.646 / 0.665 / 0.662 variante / 0.525
+persistencia), así que la selección por validación generaliza a test.
 :::
 
 ## ¿Cómo cae el desempeño con el horizonte?
@@ -437,13 +462,13 @@ por validación generaliza a test.
 ![](results/figures/nse_by_lead.png){.r-stretch fig-alt="NSE mediano por horizonte de pronóstico."}
 
 ::: {.key-message}
-Hasta ~6 h gana copiar el último valor; desde ~8 h las redes ganan y a 48 h duplican con creces el NSE de
-la persistencia (0.41 contra 0.15).
+Hasta ~6 h gana copiar el último valor; desde ~7 h las redes ganan y a 48 h duplican con creces el NSE de
+la persistencia (~0.40 contra 0.15).
 :::
 
 ::: {.notes}
-(≈1 min) En las primeras horas la red sin MRS es la mejor (0.983 a 1 h) porque ve el caudal crudo. DMEL
-solo ve componentes, cuyas últimas horas son las menos estables por el efecto de borde.
+(≈1 min) En las primeras horas dominan los dos modelos que ven el caudal crudo: sin MRS y la variante
+(0.984 a 1 h). DMEL solo ve componentes, cuyas últimas horas son las menos estables por el efecto de borde.
 :::
 
 ## Las ablaciones
@@ -453,13 +478,14 @@ solo ve componentes, cuyas últimas horas son las menos estables por el efecto d
 :::
 
 ::: {.key-message}
-Sin fuga de información, ninguno de los dos componentes centrales aporta: invertir la asignación no
-cambia nada (p = 0.087) y quitar el MRS mejora levemente (p = 2.6e-05).
+En las dos rondas, DMEL nunca supera a sus ablaciones: invertir la asignación o quitar el MRS da igual o
+levemente mejor. Las diferencias (≤ 0.015) están en el rango de la variación entre corridas.
 :::
 
 ::: {.notes}
-(≈1 min) Wilcoxon pareado sobre el NSE de las 508 cuencas. La red sin MRS además converge antes (mejor
-época 5 contra 11) y llega a menor pérdida de validación (0.382 contra 0.399).
+(≈1 min) Wilcoxon pareado sobre el NSE de las 508 cuencas. Es significativo porque compara 508 pares,
+pero compara dos modelos entrenados concretos, no dos métodos: no incluye la variabilidad entre
+corridas. Lo robusto es la dirección, que se repite en las dos rondas.
 :::
 
 ## ¿Por qué el MRS no ayuda aquí?
@@ -478,13 +504,46 @@ Parte de la mejora reportada por el paper probablemente viene de descomponer la 
 (≈1 min) Volver a la figura de fuga: el residuo calculado con el futuro sube antes de la crecida.
 :::
 
+## Variante: devolverle el caudal a DMEL
+
+::: {.columns}
+::: {.column width="50%"}
+**Qué cambia**
+
+- El LSTM recibe el RIMF de baja frecuencia **y** el caudal observado.
+- Todo lo demás es DMEL: mismo MRS, mismo Informer, misma suma.
+:::
+
+::: {.column width="50%"}
+**Resultado en test**
+
+| | DMEL | Variante |
+|---|---:|---:|
+| NSE a 1 h | 0.943 | **0.984** |
+| NSE a 6 h | 0.907 | **0.948** |
+| KGE mediano | 0.655 | **0.693** |
+| \|EP\| del pico | 41 % | **36 %** |
+:::
+:::
+
+::: {.key-message}
+Recupera las primeras horas y es el mejor en KGE, picos y entre 6 y 24 h. Pero su NSE mediano (0.624)
+iguala al modelo sin MRS: la ganancia viene del caudal crudo, no de la descomposición.
+:::
+
+::: {.notes}
+(≈1 min) A 6 h la variante (0.948) supera incluso a la persistencia (0.940). Wilcoxon contra DMEL:
+p = 2e-4.
+:::
+
 ## Las crecidas
 
 ![](results/figures/events.png){.r-stretch fig-alt="Hidrogramas de las mayores crecidas de test."}
 
 ::: {.compact}
 Las mayores crecidas parten de caudal ~0: la lluvia que las provoca aún no cae y ningún modelo las
-anticipa. Si la subida ya empezó (cuenca 363), DMEL es el que más se acerca al pico (≈1.15 contra 2.2 mm/h).
+anticipa. Si la subida ya empezó (cuenca 363), la variante es la que más se acerca al pico (≈1.4 contra
+2.2 mm/h), seguida de DMEL (≈1.15).
 :::
 
 ::: {.notes}
@@ -497,7 +556,7 @@ pronosticada estas crecidas serían predecibles.
 ![](results/figures/branches.png){.r-stretch fig-alt="Aporte del Informer y del LSTM en las crecidas."}
 
 ::: {.compact}
-Las ramas se compensan con desplazamientos casi constantes (+0.4 / −0.3). La crecida de la cuenca 363 la
+Las ramas se compensan con desplazamientos casi constantes (+0.35 / −0.3). La crecida de la cuenca 363 la
 explica el **LSTM**, que también recibe la lluvia, no el Informer.
 :::
 
@@ -519,8 +578,8 @@ La interpretación del paper ("el Informer captura los cambios bruscos") no se s
 :::
 
 ::: {.compact}
-- **Caudales bajos**: la persistencia tiene 10 % de error relativo y las redes 44–60 %; DMEL es la mejor red.
-- **Picos**: todos los subestiman (EP mediano de −32 % en DMEL); el desfase baja de 19 h a 8 h.
+- **Caudales bajos**: la persistencia tiene 10 % de error relativo; las redes con MRS 47–49 % y la sin MRS 68 %.
+- **Picos**: todos los subestiman (EP mediano de −31 % a −40 %); el desfase baja de 19 h a 7–8 h.
 :::
 
 ::: {.notes}
@@ -531,18 +590,22 @@ varianza, errores absolutos pequeños dan un NSE muy negativo.
 ## Limitaciones
 
 - Sin el futuro, los componentes de las últimas horas son los menos estables (efecto de borde).
-- DMEL no ve el caudal crudo: pierde contra la persistencia hasta ~6 h.
+- DMEL no ve el caudal crudo: pierde contra la persistencia hasta ~6 h (la variante lo corrige).
 - Una sola agrupación MRS para las 508 cuencas.
 - Las ramas no se supervisan por separado: su aporte es una interpretación.
-- Una semilla por modelo; la significancia se mide entre cuencas.
+- Una semilla por modelo: la variación entre corridas (~0.01) es comparable a las diferencias entre modelos.
 - Sin lluvia futura: las crecidas que aún no empiezan son casi impredecibles.
 
 ## Conclusiones
 
+::: {.compact}
 1. Implementamos DMEL desde cero: CEEMDAN y sample entropy propios, Informer con ProbSparse y LSTM.
 2. Descomponer la serie completa, como el paper, filtra información del futuro; lo evitamos por ventana.
-3. DMEL supera a la persistencia desde ~8 h (0.41 contra 0.15 de NSE a 48 h; 343 de 508 cuencas).
+3. DMEL supera a la persistencia desde ~7 h (0.40 contra 0.15 de NSE a 48 h; 348 de 508 cuencas).
 4. Sin fuga, ni el MRS ni la asignación de frecuencias mejoran a la misma arquitectura con el caudal crudo.
+5. Devolverle el caudal observado a DMEL recupera las primeras horas y mejora KGE y picos.
+6. 100 épocas eligen las mismas épocas que el early stopping: el resto es sobreajuste.
+:::
 
 ::: {.key-message}
 La idea de separar por frecuencias es elegante, pero en un pronóstico honesto (solo con el pasado) su
@@ -559,7 +622,7 @@ ventaja desaparece; lo que más ayudaría es información del futuro que no tene
 | Escala | $s_b=\sigma_b+0.01$ mm/h; z-score con 20 000 ventanas |
 | Informer | d_model 256, 8 cabezas, 2 enc + 1 dec, d_ff 1024, c = 5, dropout 0.1 |
 | LSTM | 2 × 256, dropout 0.1, Linear(256 → 48) |
-| Entrenamiento | Adam 3e-4, warmup 500, batch 256, máx. 30 épocas, paciencia 5, clip 1.0, TF32 |
+| Entrenamiento | Adam 3e-4, warmup 500, batch 256, 100 épocas (mejor época de validación), clip 1.0, TF32 |
 
 ## Apéndice: todas las métricas de test {.smaller visibility="uncounted"}
 

@@ -126,7 +126,7 @@ Cada corrida guarda sus argumentos, el número de parámetros y las estadística
 | Python | 3.12 (`.python-version`); dependencias fijadas en `uv.lock` (`uv sync --frozen`) |
 | Librerías principales | torch 2.11.0+cu126 (índice PyTorch cu126), numba 0.67, numpy 2.4, scipy 1.18, h5py 3.16 |
 | CEEMDAN + MRS | KHIPU, partición `standard`, 24 CPUs (job 53335: 38 min) |
-| Entrenamiento | KHIPU, partición `gpu`, NVIDIA RTX A6000 48 GB (job 53336). La A100 estaba reservada por otros usuarios; el mismo script corre en `gpu:a100:1` o en el slice `a100_3g.20gb` |
+| Entrenamiento | KHIPU, partición `gpu`, NVIDIA RTX A6000 48 GB: jobs 53366 (`dmel`, `dmel_q`, 6 h 45 min) y 53367 (`dmel_swap`, `hybrid_raw`, 6 h 26 min). La ronda con early stopping fue el job 53336. La A100 estaba reservada por otros usuarios; el mismo script corre en `gpu:a100:1` o en el slice `a100_3g.20gb` |
 | Código ejecutado | el commit queda en `REVISION` (KHIPU) y en la primera línea de cada log de Slurm (`logs/*.out`) |
 
 ### Semillas
@@ -181,33 +181,40 @@ Para cambiar un valor sin tocar el código se pasa el argumento (por ejemplo
 Las tablas de `results/tables/*.md` y las figuras de `results/figures/*.png` se regeneran con
 `dmel-evaluate`; el reporte (`REPORT.qmd`) y la presentación (`PRESENTATION.qmd`) las incluyen.
 
-> **Nota:** estos números son de la primera ronda, con early stopping (paciencia 5, máximo 30 épocas).
-> Se están reentrenando todos los modelos, más la variante `dmel_q`, con 100 épocas completas. Las
-> métricas de esta ronda quedan archivadas en `results/earlystop/`.
+Test (27 983 ventanas, 508 cuencas; NSE y KGE son medianas entre cuencas). Todos los modelos se
+entrenaron 100 épocas y se evaluó la mejor época de validación:
 
-Test (27 983 ventanas, 508 cuencas; NSE y KGE son medianas entre cuencas):
+| | Persistencia | **DMEL** | Asignación invertida | Sin MRS | Variante `dmel_q` |
+|---|---:|---:|---:|---:|---:|
+| NSE mediano | 0.492 | **0.614** | 0.620 | 0.629 | 0.624 |
+| KGE mediano | 0.626 | 0.655 | 0.672 | 0.641 | 0.693 |
+| RMSE (mm/h) | 0.119 | 0.101 | 0.101 | 0.100 | 0.100 |
+| NSE a 1 h / 6 h | 0.998 / 0.940 | 0.943 / 0.907 | 0.958 / 0.919 | 0.984 / 0.943 | 0.984 / 0.948 |
+| NSE a 24 h / 48 h | 0.538 / 0.150 | 0.649 / 0.403 | 0.660 / 0.399 | 0.656 / 0.413 | 0.672 / 0.412 |
+| \|EP\| mediano del pico / desfase | 48.9 % / 19 h | 41.3 % / 8 h | 44.8 % / 8 h | 40.3 % / 7.5 h | 36.4 % / 7 h |
+| Cuencas con NSE < 0 | 74 | 37 | 26 | 36 | 39 |
+| Mejor época (de 100) | — | 11 | 5 | 7 | 11 |
 
-| | Persistencia | **DMEL** | Asignación invertida | Sin MRS |
-|---|---:|---:|---:|---:|
-| NSE mediano | 0.492 | **0.629** | 0.629 | 0.625 |
-| KGE mediano | 0.626 | 0.673 | 0.677 | 0.681 |
-| RMSE (mm/h) | 0.119 | 0.101 | 0.101 | 0.100 |
-| NSE a 1 h / 24 h / 48 h | 0.998 / 0.538 / 0.150 | 0.957 / 0.651 / 0.407 | 0.953 / 0.675 / 0.412 | 0.983 / 0.668 / 0.400 |
-| Cuencas con NSE < 0 | 74 | 39 | 24 | 26 |
-| Mejor época / épocas entrenadas | — | 11 / 16 | 5 / 10 | 5 / 10 |
-
-- **DMEL supera a la persistencia** en 343 de 508 cuencas (Wilcoxon p = 6.2e-19), sobre todo desde ~8 h;
+- **DMEL supera a la persistencia** en 348 de 508 cuencas (Wilcoxon p = 1.6e-19), sobre todo desde ~7 h;
   en las primeras horas copiar el último valor es mejor.
-- **Ablación 1 (asignación invertida)**: sin diferencia significativa (p = 0.087).
-- **Ablación 2 (sin MRS)**: la misma arquitectura con el caudal crudo es levemente mejor (p = 2.6e-05).
+- **Ablaciones**: invertir la asignación (p = 4.5e-04) o quitar el MRS (p = 1.8e-03) da resultados
+  levemente *mejores* que DMEL. En la primera ronda con early stopping (`results/earlystop/`) la dirección
+  fue la misma: DMEL nunca supera a sus ablaciones.
+- **Variabilidad entre corridas**: DMEL eligió la misma época 11 con la misma pérdida de validación en
+  las dos rondas y su NSE mediano de test pasó de 0.629 a 0.614 (no determinismo de la GPU). Las
+  diferencias entre modelos (≤ 0.015) son de ese mismo orden.
+- **Variante `dmel_q`**: darle al LSTM el caudal observado recupera las primeras horas (0.943 → 0.984 a
+  1 h) y da el mejor KGE, los mejores errores de pico y el mejor NSE entre 6 y 24 h.
+- **100 épocas vs early stopping**: la mejor época quedó entre la 5 y la 11 en todos los modelos; el resto
+  es sobreajuste, así que el early stopping no cortaba antes de tiempo.
 - Descomponer la serie completa, como el paper, hace que los componentes lentos cambien 4–6× más que el
   ruido propio de CEEMDAN (`results/figures/leakage.png`): es una explicación probable de parte de las
   ganancias reportadas en el paper.
 - Errores principales: crecidas provocadas por lluvia que aún no cae (no hay meteorología futura en
   inferencia), picos subestimados (~30–40 %) y caudales bajos, donde la persistencia es mucho mejor.
 
-El análisis completo está en `REPORT.qmd` / `REPORT.html`; las predicciones de test, en
-`predictions/dmel_s0_test.csv` (y una por cada ablación).
+El análisis completo está en `REPORT.qmd` / `REPORT.html`. Las predicciones de test están en
+`predictions/dmel_s0_test.csv` (DMEL, el método del paper), con una por cada ablación y otra para la variante.
 
 ## Limitaciones
 
@@ -216,7 +223,8 @@ El análisis completo está en `REPORT.qmd` / `REPORT.html`; las predicciones de
 - La agrupación del MRS es global. Por cuenca podría cambiar algún componente limítrofe (IMF5/IMF6).
 - Las ramas no se supervisan por separado, así que su aporte (`results/events.png`) es una
   interpretación, no un pronóstico de cada banda de frecuencia.
-- Una sola semilla por modelo.
+- Una sola semilla por modelo; la variación entre dos corridas iguales (~0.01–0.015 de NSE mediano) es
+  comparable a las diferencias entre modelos.
 
 ## Uso de IA generativa
 

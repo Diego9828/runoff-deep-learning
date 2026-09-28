@@ -20,7 +20,7 @@ mm/h (normalizado por el área de la cuenca) y las predicciones se entregan en l
 | Partición | Ventanas | Uso |
 |---|---:|---|
 | train (`split = 0`) | 254 000 | entrenamiento, normalización y agrupación MRS |
-| validación (`split = 1`) | 18 142 | selección de la mejor época (early stopping) |
+| validación (`split = 1`) | 18 142 | selección de la mejor época |
 | test | 27 983 | predicciones finales; `test_targets.csv` solo se usa en este reporte |
 
 - **508 cuencas** anónimas, todas presentes en las tres particiones: la división es temporal, dentro de cada cuenca.
@@ -228,8 +228,8 @@ componentes futuros no existen en inferencia, así que no se supervisa cada rama
 | Diario: 7 días → 1/3/5/7 días | Horario: 336 h → 48 h directas | Enunciado del laboratorio |
 | Embedding temporal global | Omitido | No hay fechas |
 | MSE | NSE\* con escala por cuenca + 2 canales estáticos | Caudal de magnitudes muy distintas entre cuencas |
-| Batch 32, lr 1e-4, 100 épocas | Batch 256, lr 3e-4 + warmup, early stopping (máx. 30) | ~250× más datos: una época equivale a ~30 del paper |
-| 10 corridas + Wilcoxon | 1 semilla + Wilcoxon sobre las 508 cuencas | Tiempo de GPU (1 GPU por usuario en KHIPU) |
+| Batch 32, lr 1e-4, 100 épocas | Batch 256, lr 3e-4 + warmup, 100 épocas; se guarda la mejor época de validación | ~250× más datos: una época equivale a ~30 del paper |
+| 10 corridas + Wilcoxon | 1 semilla por modelo (en 2 rondas) + Wilcoxon sobre las 508 cuencas | Tiempo de GPU (1 GPU por usuario en KHIPU) |
 
 ## 4. Entrenamiento
 
@@ -238,20 +238,38 @@ componentes futuros no existen en inferencia, así que no se supervisa cada rama
 | Optimizador | Adam, lr $3\times10^{-4}$, warmup lineal de 500 pasos |
 | Scheduler | ReduceLROnPlateau (factor 0.5, paciencia 2) |
 | Batch | 256 (993 pasos por época) |
-| Épocas | máximo 30; early stopping con paciencia 5 sobre la pérdida de validación |
+| Épocas | 100, como el paper; se guarda la época con menor pérdida de validación |
 | Regularización | dropout 0.1; clip de norma de gradiente 1.0 |
 | Precisión | float32 con TF32 |
-| Hardware | NVIDIA RTX A6000 48 GB (KHIPU); ~2 min por época para DMEL |
+| Hardware | NVIDIA RTX A6000 48 GB (KHIPU); ~2 min por época, ~3.3 h por modelo |
 | Semillas | 0 (pesos y batches, ruido de CEEMDAN, muestras del MRS y de normalización) |
 
-![Pérdida NSE\* de train y validación, NSE mediano de validación y learning rate.](results/figures/training_curves.png)
+![Pérdida NSE\* de train y validación, NSE mediano de validación y learning rate durante las 100 épocas.](results/figures/training_curves.png)
 
 {{< include results/tables/training.md >}}
 
-El early stopping cortó DMEL en la época 16 (mejor época 11) y las dos ablaciones en la época 10 (mejor
-época 5); el job completo tomó 1 h 18 min. En los tres casos la pérdida de train sigue bajando mientras la
-de validación se estanca: sin el early stopping los modelos sobreajustarían, así que las 100 épocas del
-paper no tendrían sentido con este volumen de datos.
+### 4.1 ¿Early stopping o 100 épocas?
+
+Hubo dos rondas de entrenamiento. La primera usó early stopping (paciencia 5, máximo 30 épocas). La
+segunda, que es la que se reporta, entrenó las 100 épocas completas y se quedó con la mejor época de
+validación. Las métricas de la primera ronda están en `results/earlystop/`.
+
+| Modelo | Ronda 1: épocas / mejor época | NSE mediano test | Ronda 2 (100 épocas): mejor época | NSE mediano test |
+|---|---:|---:|---:|---:|
+| DMEL | 16 / 11 | 0.629 | 11 | 0.614 |
+| Ablación: asignación invertida | 10 / 5 | 0.629 | 5 | 0.620 |
+| Ablación: sin MRS | 10 / 5 | 0.625 | 7 | 0.629 |
+
+- **La mejor época está siempre entre la 5 y la 11.** Después, la pérdida de train sigue bajando (hasta
+  0.26–0.28) y la de validación sube (hasta 0.43–0.45): es sobreajuste. Hacia la época 50 el learning rate
+  llega a su piso (~2e-8) y el modelo deja de cambiar.
+- **El early stopping no cortó antes de tiempo**: con 100 épocas se eligen las mismas épocas (DMEL y
+  asignación invertida) o casi las mismas (sin MRS: la 7 en vez de la 5). Las 90 épocas extra costaron
+  ~13 h de GPU, contra ~2 h de la primera ronda.
+- **Variabilidad entre corridas.** DMEL eligió la misma época 11 con la misma pérdida de validación
+  (0.3988 y 0.3987) y aun así su NSE mediano de test pasó de 0.629 a 0.614. Con la misma semilla, las
+  operaciones no deterministas de la GPU (cuDNN, sumas atómicas) llevan a pesos distintos. Esa
+  variación de ~0.01–0.015 es del mismo orden que las diferencias entre modelos (sección 7.3).
 
 ## 5. Modelo base y ablaciones
 
@@ -261,9 +279,11 @@ paper no tendrían sentido con este volumen de datos.
 | **DMEL** | Informer(RIMF HF) | LSTM(RIMF LF) | Propuesta del paper |
 | Ablación: asignación invertida | LSTM(RIMF HF) | Informer(RIMF LF) | ¿Importa qué modelo recibe cada frecuencia? (paper, Sec. 5.2) |
 | Ablación: sin MRS | Informer(caudal) | LSTM(caudal) | ¿Aporta la descomposición? Misma arquitectura y tamaño, sin CEEMDAN ni SE |
+| Variante: DMEL + caudal | Informer(RIMF HF) | LSTM(RIMF LF + caudal) | Propia: ¿recupera DMEL las primeras horas si el LSTM también ve el caudal observado? |
 
-Las tres redes tienen la misma capacidad (~3.7 M parámetros) y el mismo entrenamiento; solo cambia la
-entrada de cada rama o la asignación de frecuencias.
+Las cuatro redes tienen la misma capacidad (~3.7 M parámetros) y el mismo entrenamiento; solo cambia la
+entrada de cada rama o la asignación de frecuencias. La variante no es parte del paper: responde al
+problema de las primeras horas encontrado en la primera ronda.
 
 ## 6. Métricas
 
@@ -295,18 +315,20 @@ con $r$ la correlación, $\alpha=\sigma_{\hat{q}}/\sigma_q$ y $\beta=\mu_{\hat{q
 
 ![Distribución del NSE de las 508 cuencas en horizontes clave (test).](results/figures/nse_boxes.png)
 
-- **DMEL supera a la persistencia en el agregado**: NSE mediano de 0.629 contra 0.492, KGE de 0.673 contra
-  0.626 y RMSE de 0.101 contra 0.119 mm/h. Las cuencas con NSE negativo bajan de 74 a 39.
+- **DMEL supera a la persistencia en el agregado**: NSE mediano de 0.614 contra 0.492, KGE de 0.655 contra
+  0.626 y RMSE de 0.101 contra 0.119 mm/h. Las cuencas con NSE negativo bajan de 74 a 37.
 - **La ventaja aparece en los horizontes largos.** Hasta ~6 h la persistencia es mejor (a 1 h, 0.998
-  contra 0.957): el caudal horario cambia poco y copiar el último valor es difícil de batir. Desde ~8 h
-  las tres redes la superan y la brecha crece: 0.651 contra 0.538 a 24 h y 0.407 contra 0.150 a 48 h.
-- **Las tres redes son casi indistinguibles** en el agregado (NSE mediano entre 0.625 y 0.629). La
-  diferencia está en las primeras horas: sin MRS la red llega a 0.983 a 1 h, porque recibe el caudal
-  observado. DMEL solo ve sus componentes, y justo las últimas horas de cada componente son las menos
-  estables (efecto de borde de la descomposición por ventana).
-- Validación y test cuentan la misma historia (NSE mediano de validación: 0.638 DMEL, 0.641 asignación
-  invertida, 0.655 sin MRS, 0.525 persistencia), así que la selección por validación generaliza al
-  periodo de test.
+  contra 0.943 de DMEL): el caudal horario cambia poco y copiar el último valor es difícil de batir. Desde
+  ~7 h las redes la superan y la brecha crece: 0.649 contra 0.538 a 24 h y 0.403 contra 0.150 a 48 h.
+- **Las cuatro redes quedan cerca** en el agregado (NSE mediano entre 0.614 y 0.629). La diferencia está
+  en las primeras horas. Los dos modelos que ven el caudal observado (sin MRS y la variante) llegan a
+  0.984 a 1 h; DMEL (0.943) y la asignación invertida (0.958) solo ven componentes, y justo las últimas
+  horas de cada componente son las menos estables (efecto de borde de la descomposición por ventana).
+- **La variante DMEL + caudal es la más equilibrada**: la mejor entre ~6 y ~24 h (0.948 a 6 h, por encima
+  incluso de la persistencia, y 0.672 a 24 h), con el mejor KGE (0.693) y los mejores errores de pico.
+- Validación y test cuentan la misma historia (NSE mediano de validación: 0.662 variante, 0.624 DMEL,
+  0.646 asignación invertida, 0.665 sin MRS, 0.525 persistencia), así que la selección por validación
+  generaliza al periodo de test.
 
 ### 7.3 Ablaciones
 
@@ -314,13 +336,25 @@ con $r$ la correlación, $\alpha=\sigma_{\hat{q}}/\sigma_q$ y $\beta=\mu_{\hat{q
 
 ![Distribución acumulada del NSE por cuenca (test).](results/figures/nse_cdf.png)
 
-- **DMEL vs persistencia**: mejora el NSE en 343 de 508 cuencas (mediana de +0.082, p = 6.2e-19).
-- **Ablación 1, asignación invertida**: diferencia de −0.005 en la mediana, DMEL gana en 238 de 508
-  cuencas, **p = 0.087: no significativa**. Da igual qué red recibe la alta frecuencia y cuál la baja. El
-  paper (Sec. 5.2) sí encontraba una ventaja clara de su asignación.
-- **Ablación 2, sin MRS**: la misma arquitectura con el caudal crudo es **levemente mejor** que DMEL
-  (−0.009 en la mediana, DMEL gana solo en 209 de 508 cuencas, p = 2.6e-05). Además converge antes (mejor
-  época 5 contra 11) y llega a una pérdida de validación menor (0.382 contra 0.399).
+- **DMEL vs persistencia**: mejora el NSE en 348 de 508 cuencas (mediana de +0.081, p = 1.6e-19).
+- **Ablación 1, asignación invertida**: es levemente mejor que DMEL (−0.005 en la mediana; DMEL gana en
+  224 de 508 cuencas, p = 4.5e-04). En la primera ronda eran iguales (p = 0.087). El paper (Sec. 5.2)
+  encontraba una ventaja clara de su asignación; aquí no aparece en ninguna de las dos rondas.
+- **Ablación 2, sin MRS**: la misma arquitectura con el caudal crudo también es levemente mejor (−0.006
+  en la mediana; DMEL gana en 231 de 508 cuencas, p = 1.8e-03). En la primera ronda pasó lo mismo
+  (p = 2.6e-05). Además converge antes (mejor época 7 contra 11).
+- **Variante DMEL + caudal**: mejor que DMEL (−0.007; DMEL gana en 221 de 508 cuencas, p = 2.0e-04).
+
+**Cómo leer estas diferencias.** El Wilcoxon es muy significativo porque compara 508 pares de cuencas,
+pero compara dos modelos entrenados concretos, no dos métodos: no incluye la variabilidad entre
+corridas. Esa variabilidad es de ~0.01–0.015 en el NSE mediano (sección 4.1), del mismo tamaño que las
+diferencias entre DMEL y sus ablaciones. La conclusión robusta es de dirección, repetida en las dos
+rondas: **DMEL nunca supera a sus ablaciones**, así que ni el MRS ni la asignación de frecuencias aportan
+una mejora medible en este problema. Establecer diferencias de 0.01 exigiría varias semillas por modelo.
+
+La variante confirma dónde está el problema: al devolverle al LSTM el caudal observado, DMEL recupera
+las primeras horas. Pero su NSE mediano (0.624) queda al nivel del modelo sin MRS (0.629): la ganancia
+viene del caudal crudo, no de la descomposición.
 
 **¿Por qué el MRS no ayuda aquí si en el paper sí?**
 
@@ -358,42 +392,48 @@ con $r$ la correlación, $\alpha=\sigma_{\hat{q}}/\sigma_q$ y $\beta=\mu_{\hat{q
 - **Crecidas que empiezan después del pronóstico.** Las mayores subidas de test parten de un caudal
   casi nulo (cuencas 0, 139 y 275) y ningún modelo las anticipa. La lluvia que las provoca todavía no cae
   en la historia, y las variables meteorológicas futuras (`y_aux`) no están disponibles en inferencia.
-  Cuando la subida ya empezó (cuenca 363), los modelos reaccionan: DMEL es el que más se acerca al pico
-  (≈1.15 contra 2.2 mm/h observados), pero baja demasiado lento en la recesión.
-- **Picos subestimados.** En las ventanas de crecida, todos subestiman el pico: EP mediano de −32 %
-  (DMEL), −39 % (asignación invertida), −31 % (sin MRS) y −49 % (persistencia). El desfase mediano del
-  pico es de 8 h para las redes y 19 h para la persistencia.
+  Cuando la subida ya empezó (cuenca 363), los modelos reaccionan: la variante es la que más se acerca
+  al pico (≈1.4 contra 2.2 mm/h observados), seguida de DMEL (≈1.15), y todos bajan demasiado lento en
+  la recesión.
+- **Picos subestimados.** En las ventanas de crecida, todos subestiman el pico: EP mediano de −31 %
+  (variante), −34 % (DMEL y sin MRS), −40 % (asignación invertida) y −49 % (persistencia). El desfase
+  mediano del pico es de 7–8 h para las redes y 19 h para la persistencia.
 - **Las ramas no se reparten las frecuencias.** Las dos salidas se compensan con desplazamientos casi
-  constantes (por ejemplo, +0.4 y −0.3 mm/h en la cuenca 139). En la crecida de la cuenca 363 la
+  constantes (por ejemplo, +0.35 y −0.3 mm/h en la cuenca 139). En la crecida de la cuenca 363 la
   respuesta la lleva el **LSTM**, que también recibe la lluvia, y no el Informer. Al entrenar sobre la
   suma, la división en aportes de alta y baja frecuencia no es identificable, así que la interpretación
   del paper ("el Informer captura los cambios bruscos") no se sostiene aquí.
 - **Caudales bajos.** En el tercio más bajo de cada cuenca, la persistencia tiene un error relativo de
-  10 % y las redes de 44–60 %. Las recesiones lentas se predicen casi perfecto copiando el último valor,
-  mientras que las redes agregan ruido relativo cuando la magnitud es mínima (la pérdida NSE\* pesa por
-  la variabilidad de la cuenca, no por el nivel del caudal). DMEL es la mejor red en este régimen (44 %
-  contra 60 % sin MRS): el componente suave de baja frecuencia sí ayuda en las recesiones. En caudales
-  altos las redes superan a la persistencia (31–33 % contra 39 %).
-- **Cuencas casi secas.** Las cuencas en que DMEL tiene NSE muy negativo se concentran en caudales medios
-  por debajo de 0.01 mm/h. Ahí la varianza del periodo de test es mínima y errores absolutos pequeños
-  dan un NSE muy negativo.
+  10 %, contra 47–49 % de las redes con MRS y 68 % de la red sin MRS. Las recesiones lentas se predicen
+  casi perfecto copiando el último valor, mientras que las redes agregan ruido relativo cuando la
+  magnitud es mínima (la pérdida NSE\* pesa por la variabilidad de la cuenca, no por el nivel del
+  caudal). Es el único régimen donde el MRS sí ayuda: el componente suave de baja frecuencia estabiliza
+  las recesiones. En caudales altos las redes superan a la persistencia (31–33 % contra 39 %).
+- **Cuencas casi secas.** Las cuencas con NSE muy negativo se concentran en caudales medios por debajo de
+  0.01 mm/h. Ahí la varianza del periodo de test es mínima y errores absolutos pequeños dan un NSE muy
+  negativo. Las redes tienen entre 26 y 39 cuencas con NSE negativo, contra 74 de la persistencia.
 
 ## 9. Conclusiones
 
 1. Implementamos DMEL desde cero: CEEMDAN mejorado en numba, sample entropy, la regla MRS, el Informer
    con atención ProbSparse, el LSTM y el ensamble dual. Lo adaptamos a pronóstico horario multi-cuenca
    sin información del futuro.
-2. DMEL supera claramente a la persistencia a partir de ~8 h (NSE mediano de 0.41 contra 0.15 a 48 h;
-   mejor en 343 de 508 cuencas), pero no en las primeras horas.
-3. Sin la fuga de información, **ninguno de los dos componentes centrales aporta**: invertir la
-   asignación de frecuencias no cambia el resultado (p = 0.087) y quitar el MRS lo mejora levemente
-   (p = 2.6e-05).
+2. DMEL supera claramente a la persistencia a partir de ~7 h (NSE mediano de 0.40 contra 0.15 a 48 h;
+   mejor en 348 de 508 cuencas), pero no en las primeras horas.
+3. Sin la fuga de información, **ninguno de los dos componentes centrales aporta**: en las dos rondas de
+   entrenamiento, invertir la asignación de frecuencias y quitar el MRS dan resultados iguales o
+   levemente mejores que DMEL. Las diferencias (≤ 0.015 de NSE mediano) son del orden de la
+   variabilidad entre corridas.
 4. La descomposición de la serie completa del paper hace que los componentes lentos cambien 4–6 veces más
    que el ruido propio de CEEMDAN al incluir el futuro. Es una explicación probable de parte de las
    ganancias reportadas.
-5. Los errores dominantes son las crecidas provocadas por lluvia futura y la subestimación de los picos
-   (~30–40 %). Las mejoras naturales son usar precipitación pronosticada, si existiera en operación, y
-   darle a DMEL también el caudal crudo para recuperar las primeras horas.
+5. La variante propia, DMEL con el caudal observado en el LSTM, recupera las primeras horas (0.943 → 0.984
+   a 1 h) y logra el mejor KGE (0.693), los mejores errores de pico y el mejor NSE entre 6 y 24 h. La
+   ganancia viene del caudal crudo, no de la descomposición.
+6. Entrenar 100 épocas, como el paper, eligió los mismos checkpoints que el early stopping (mejor época
+   entre la 5 y la 11): con este volumen de datos, el resto es sobreajuste.
+7. Los errores dominantes son las crecidas provocadas por lluvia futura y la subestimación de los picos
+   (~30–40 %). La mejora natural sería usar precipitación pronosticada, si existiera en operación.
 
 ## 10. Limitaciones
 
@@ -403,20 +443,23 @@ con $r$ la correlación, $\alpha=\sigma_{\hat{q}}/\sigma_q$ y $\beta=\mu_{\hat{q
   podría pertenecer al otro grupo.
 - **Ramas no supervisadas por separado**: el aporte de cada rama es una interpretación, no un pronóstico
   de cada banda de frecuencia.
-- **Una semilla** por modelo: la significancia se mide entre cuencas, no entre corridas.
+- **Una semilla** por modelo: la significancia se mide entre cuencas, no entre corridas, y la variación
+  entre dos corridas iguales (~0.01–0.015) es comparable a las diferencias entre modelos.
 - **Sin covariables futuras**: la lluvia de las próximas 48 h (`y_aux`) no está disponible en inferencia,
   lo que limita el pronóstico del inicio de crecidas que aún no empezaron.
 - **Caudales bajos**: en las recesiones el error relativo de las redes es mucho mayor que el de la
   persistencia.
-- **Primeras horas**: DMEL no ve el caudal crudo y pierde contra la persistencia hasta ~6 h.
+- **Primeras horas**: DMEL no ve el caudal crudo y pierde contra la persistencia hasta ~6 h; la variante
+  lo corrige, pero ya no es exactamente el método del paper.
 
 ## 11. Reproducibilidad
 
 ```bash
-uv sync --frozen && uv run pytest                   # 19 tests
+uv sync --frozen && uv run pytest                   # 20 tests
 bash hpc/push.sh                                    # sube el commit actual a KHIPU
 sbatch hpc/decompose.slurm                          # CEEMDAN + MRS (CPU)
-sbatch --dependency=afterok:<id> hpc/train.slurm    # dmel, dmel_swap, hybrid_raw + evaluación
+MODELS="dmel dmel_q" sbatch hpc/train.slurm         # 100 épocas, ~6.8 h
+MODELS="dmel_swap hybrid_raw" sbatch --dependency=afterany:<id> hpc/train.slurm   # + evaluación
 bash hpc/pull.sh && quarto render REPORT.qmd
 ```
 
