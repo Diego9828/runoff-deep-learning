@@ -121,15 +121,18 @@ de las dos ramas: la ecuación 14 del paper.”
 **Tiempo: 5:05–6:00**
 
 “La atención ProbSparse evita calcular la atención completa para todas las
-consultas. Primero muestrea un subconjunto de claves y, con ellas, mide qué tan
-activa es cada consulta: la diferencia entre su puntaje máximo y su puntaje
-promedio. Esa medida aproxima la divergencia KL entre la atención de la
-consulta y una atención uniforme.
+consultas. La actividad de una consulta se mide con la divergencia KL entre su
+atención y una atención uniforme, que se reduce a un log-sum-exp menos un
+promedio. Pero el log-sum-exp exige todas las claves.
+
+[Señalar la segunda línea de la ecuación.] Los autores del Informer
+demostraron que ese término está acotado por el valor máximo: queda entre el
+máximo y el máximo más el logaritmo de L. Por eso lo reemplazan por el máximo,
+calculado sobre un subconjunto muestreado de claves.
 
 Solo las consultas más activas, c por el logaritmo de L, calculan la atención
 completa: con c igual a 5, son 30 de 336 en el encoder. Las demás reciben la
-media de los valores, porque una atención casi uniforme no aporta
-información.”
+media de los valores.”
 
 ---
 

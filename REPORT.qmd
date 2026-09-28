@@ -115,7 +115,7 @@ flowchart TD
 ```{mermaid}
 %%| fig-cap: "Este trabajo: cada ventana se descompone por separado."
 flowchart TD
-    A["Cada ventana: solo sus 336 h pasadas"] --> B["CEEMDAN de la ventana"]
+    A["Cada ventana:<br/>solo sus 336 h pasadas"] --> B["CEEMDAN de la ventana"]
     B --> C["IMF(t) usa solo q(… t)"]
     C --> D["Igual en train y en test"]
 ```
@@ -222,14 +222,27 @@ flowchart LR
   cross-attention completa y proyección a 1 salida por hora.
 - $d_{\text{model}}=256$, 8 cabezas, $d_{ff}=1024$, GELU, dropout 0.1.
 
-La atención ProbSparse solo calcula atención completa para las $u=c\ln L$ queries más activas, medidas con
+La atención ProbSparse solo calcula atención completa para las $u=c\ln L$ queries más activas. La
+actividad de una query se mide con la divergencia KL entre su distribución de atención y una uniforme,
+que, sin constantes, es
 
 $$
-\bar{M}(\mathbf{q}_i,\mathbf{K})=\max_{j}\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}-\frac{1}{U}\sum_{j\in\mathcal{U}}\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}},
+M(\mathbf{q}_i,\mathbf{K})=\ln\sum_{j=1}^{L_K}e^{s_{ij}}-\frac{1}{L_K}\sum_{j=1}^{L_K}s_{ij},\qquad
+s_{ij}=\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}.
 $$
 
-que aproxima la divergencia KL entre la atención de la query y la distribución uniforme ($U=c\ln L_K$ claves
-muestreadas). Con $c=5$ son 30 de las 336 queries en el encoder y 25 de 96 en el decoder; las demás reciben
+Calcular el log-sum-exp exige todas las claves. Zhou et al. (2021, Lema 1) demostraron que ese término
+está acotado por el máximo,
+
+$$
+\max_j s_{ij}\;\le\;\ln\sum_{j}e^{s_{ij}}\;\le\;\max_j s_{ij}+\ln L_K,
+$$
+
+así que lo reemplazan por el máximo sobre $U=c\ln L_K$ claves muestreadas:
+
+$$
+\bar{M}(\mathbf{q}_i,\mathbf{K})=\max_{j\in\mathcal{U}}s_{ij}-\frac{1}{U}\sum_{j\in\mathcal{U}}s_{ij}.
+$$ Con $c=5$ son 30 de las 336 queries en el encoder y 25 de 96 en el decoder; las demás reciben
 la media de $V$ (media acumulada si es causal). Respecto del código oficial se corrigieron cuatro detalles:
 un solo muestreo de claves por pasada (evita un tensor de ~2.6 GB por capa), la media sobre las claves
 muestreadas, la media acumulada en lugar de la suma y sin el reshape `mix`. Un test verifica que ProbSparse

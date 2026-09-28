@@ -171,6 +171,9 @@ $presentation-block-margin: 14px;
   display: none;
 }
 
-.reveal .short-diagram svg {
-  max-height: 250px !important;
+.reveal .wide-diagram svg {
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  max-height: none !important;
 }

@@ -116,7 +116,7 @@ orden.
 
 ## Paso 1 · CEEMDAN separa el caudal en modos
 
-![](results/figures/decomposition.png){.r-stretch fig-alt="Caudal de una ventana y sus seis IMF más el residuo."}
+![](results/figures/decomposition.png){.r-stretch fig-alt="Caudal de una ventana y sus seis IMF más el residuo." style="margin: 0 auto; display: block;"}
 
 ::: {.tiny .muted}
 $r_k=\langle M(r_{k-1}+\beta_{k-1}E_k(w^{(i)}))\rangle$, $\mathrm{IMF}_k=r_{k-1}-r_k$: se agrega ruido
@@ -240,60 +240,63 @@ media de $V$
 :::
 :::
 
+::: {.compact}
 $$
-\bar{M}(\mathbf{q}_i,\mathbf{K})=\max_j\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}-\frac{1}{U}\sum_{j}\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}
+\begin{aligned}
+M(\mathbf{q}_i,\mathbf{K}) &= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\text{log-sum-exp}}-\frac{1}{L_K}\sum_{j=1}^{L_K} s_{ij},
+\qquad s_{ij}=\frac{\mathbf{q}_i\mathbf{k}_j^\top}{\sqrt{d}}\\
+\max_j s_{ij} \;\le\; \ln\sum_j e^{s_{ij}} &\;\le\; \max_j s_{ij}+\ln L_K \qquad \text{(Lema 1, Zhou et al., 2021)}\\
+\bar{M}(\mathbf{q}_i,\mathbf{K}) &= \max_{j\in\mathcal{U}} s_{ij}-\frac{1}{U}\sum_{j\in\mathcal{U}} s_{ij}
+\end{aligned}
 $$
+:::
 
 ::: {.compact}
-Con $c=5$: **30 de 336** queries en el encoder y 25 de 96 en el decoder causal. $\bar{M}$ aproxima la
-divergencia KL frente a una atención uniforme.
+$M$ sale de la divergencia KL entre la atención de la query y una uniforme, pero el log-sum-exp exige
+todas las claves. Los autores demostraron que ese término está acotado por el máximo, así que lo
+reemplazan por el máximo sobre $U=c\ln L$ claves muestreadas: $\bar{M}$. Con $c=5$: **30 de 336** queries
+en el encoder y 25 de 96 en el decoder causal.
 :::
 
 ::: {.notes}
 (≈1 min) Una query con atención casi uniforme no aporta: su salida es casi la media de V. Solo las
-queries "picudas" pagan el costo cuadrático.
+queries "picudas" pagan el costo cuadrático. La cota garantiza que usar el máximo no se aleja más de
+ln L_K del log-sum-exp.
 :::
 
 # Implementación
 
 ## ¿Por qué el protocolo del paper filtra el futuro?
 
-::: {.columns .short-diagram}
-::: {.column width="50%"}
-**Paper**
+**Paper**: se descompone y después se divide
 
+::: {.wide-diagram}
 ```{mermaid}
-%%| fig-width: 5
-%%| fig-height: 3.6
-flowchart TD
-    A["Serie completa 2002–2005<br/>train + validación + test"] --> B["CEEMDAN de toda la serie"]
-    B --> C["Recién aquí se divide 7 : 1.5 : 1.5"]
+flowchart LR
+    A["Serie completa 2002–2005<br/>train + validación + test"] --> B["CEEMDAN de<br/>toda la serie"]
+    B --> C["Recién aquí se divide<br/>7 : 1.5 : 1.5"]
     C --> D["El modelo recibe IMF(t),<br/>calculado con q(t+1 … T)"]
 ```
 :::
 
-::: {.column width="50%"}
-**Este trabajo**
+**Este trabajo**: cada ventana se descompone por separado
 
+::: {.wide-diagram}
 ```{mermaid}
-%%| fig-width: 5
-%%| fig-height: 3.6
-flowchart TD
-    A["Cada ventana: solo sus 336 h pasadas"] --> B["CEEMDAN de la ventana"]
-    B --> C["IMF(t) usa solo q(… t)"]
-    C --> D["Igual en train y en test"]
+flowchart LR
+    A["Cada ventana:<br/>solo sus 336 h pasadas"] --> B["CEEMDAN de<br/>la ventana"]
+    B --> C["IMF(t) usa<br/>solo q(… t)"]
+    C --> D["Igual en train<br/>y en test"]
 ```
-:::
 :::
 
 ::: {.compact}
-EMD no es causal: las envolventes son splines que pasan por los máximos y mínimos **a ambos lados** de *t*,
-así que el valor de un IMF en *t* depende de lo que ocurre después.
+EMD no es causal: las envolventes pasan por máximos y mínimos **a ambos lados** de *t*, así que el IMF
+en *t* depende del futuro.
 :::
 
 ::: {.key-message}
-Descomponer antes de dividir le da al modelo una pista de los días que debe pronosticar. En un pronóstico
-real, y en el test de este laboratorio, esa pista no existe.
+Descomponer antes de dividir le da al modelo una pista que en test no existe.
 :::
 
 ::: {.notes}
