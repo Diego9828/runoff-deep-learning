@@ -1,4 +1,5 @@
 comparación,mediana ΔNSE,cuencas donde gana,p-valor
-DMEL (paper) vs Persistencia,0.08239001,343/508,6.2e-19
-DMEL (paper) vs Ablación: asignación invertida,-0.0050073266,238/508,8.7e-02
-DMEL (paper) vs Ablación: sin MRS,-0.009398162,209/508,2.6e-05
+DMEL (paper) vs Persistencia,0.08079222,348/508,1.6e-19
+DMEL (paper) vs Variante: DMEL + caudal,-0.0072927773,221/508,2.0e-04
+DMEL (paper) vs Ablación: asignación invertida,-0.0054903626,224/508,4.5e-04
+DMEL (paper) vs Ablación: sin MRS,-0.005508244,231/508,1.8e-03
