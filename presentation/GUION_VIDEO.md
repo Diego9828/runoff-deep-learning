@@ -233,13 +233,14 @@ mientras el entrenamiento sigue bajando: es sobreajuste.”
 **Tiempo: 10:45–11:25**
 
 “Primero entrenamos con early stopping y después repetimos todo con 100 épocas,
-para descartar que hubiéramos cortado antes de tiempo. Se eligen las mismas
-épocas, entre la 5 y la 11: el early stopping era correcto.
+para descartar un corte prematuro; la variante solo existe en esta segunda
+ronda. Se eligen las mismas épocas, entre la 5 y la 11: el early stopping era
+correcto.
 
-Pero encontramos algo importante. DMEL eligió la misma época, con la misma
-pérdida de validación, en las dos rondas, y aun así su NSE de test pasó de 0.629
-a 0.614, por el no determinismo de la GPU. Esa variación es del mismo tamaño que
-las diferencias entre modelos.”
+Pero hay algo importante. DMEL eligió la misma época, con la misma pérdida de
+validación, en las dos rondas, y aun así su NSE de test pasó de 0.629 a 0.614,
+por el no determinismo de la GPU. Esa variación es del tamaño de las diferencias
+entre modelos.”
 
 ## Slide: ¿Qué comparamos?
 
@@ -273,9 +274,12 @@ pico y usamos Wilcoxon para la significancia.”
 **Tiempo: 12:30–13:05**
 
 “En test, DMEL obtiene un NSE mediano de 0.614, frente a 0.492 de la
-persistencia, y es mejor en 348 de las 508 cuencas. El RMSE baja de 0.119 a
-0.101 milímetros por hora. Sin embargo, las cuatro redes quedan muy cerca entre
-sí, con un NSE mediano entre 0.614 y 0.629.”
+persistencia, y el Wilcoxon confirma que es mejor en 348 de las 508 cuencas,
+con un p-valor del orden de 10 a la menos 19. El RMSE baja de 0.119 a 0.101
+milímetros por hora y el error del pico, de 49 a 41 por ciento.
+
+[Señalar la última fila.] Pero las cuatro redes quedan muy cerca entre sí, y
+las otras tres superan levemente a DMEL.”
 
 ## Slide: ¿Cómo cae el desempeño con el horizonte?
 
