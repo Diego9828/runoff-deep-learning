@@ -153,7 +153,7 @@ Cada corrida guarda sus argumentos, el número de parámetros y las estadística
 | | Umbral de voto / banda τ | 0.5 / 0.1 | `propose_groups()` y `--tau` |
 | | Resultado | HF = IMF1…IMF5 (5 RIMFs); LF = IMF6 + residuo (1 RIMF) | `artifacts/mrs.json` |
 | Entradas | Escala por cuenca | s_b = σ_b + ε, ε = 0.01 mm/h (estadísticas de train) | `EPS`, `basin_scales()`, `src/dmel/data.py` |
-| | Canales por rama | hf: 5 RIMFs + 11 meteorológicas + 2 estáticos = 18; lf: 1 + 11 + 2 = 14; raw: 1 + 11 + 2 = 14 | `make_inputs()` |
+| | Canales por rama | hf: 5 RIMFs + 11 meteorológicas + 2 estáticos = 18; lf: 1 + 11 + 2 = 14; lf_q (variante): 1 RIMF + caudal + 11 + 2 = 15; raw: 1 + 11 + 2 = 14 | `SOURCES`, `make_inputs()` |
 | | Normalización | z-score por canal con 20 000 ventanas de train | `fit_norm()` |
 | Informer | d_model, cabezas, d_ff | 256, 8, 1024 (paper: igual) | `Informer.__init__`, `src/dmel/informer.py` |
 | | Capas encoder / decoder | 2 / 1, con 1 distilling (336 → 168) | |

@@ -176,11 +176,12 @@ uno de baja frecuencia (IMF6 + residuo) para el LSTM.
 
 Cada rama recibe sus RIMF, las 11 covariables y 2 canales estáticos de la cuenca:
 
-| Entrada | Canales | Contenido |
-|---|---:|---|
-| `hf` (rama Informer) | 18 | 5 RIMF HF + 11 meteorológicas + log $s_b$ + log $\mu_b$ |
-| `lf` (rama LSTM) | 14 | 1 RIMF LF + 11 meteorológicas + 2 estáticos |
-| `raw` (ablación sin MRS) | 14 | caudal + 11 meteorológicas + 2 estáticos |
+| Entrada | Canales | Contenido | La usan |
+|---|---:|---|---|
+| `hf` | 18 | 5 RIMF HF + 11 meteorológicas + log $s_b$ + log $\mu_b$ | Informer de DMEL y de la variante; LSTM de la asignación invertida |
+| `lf` | 14 | 1 RIMF LF + 11 meteorológicas + 2 estáticos | LSTM de DMEL; Informer de la asignación invertida |
+| `lf_q` | 15 | 1 RIMF LF + caudal + 11 meteorológicas + 2 estáticos | LSTM de la variante DMEL + caudal |
+| `raw` | 14 | caudal + 11 meteorológicas + 2 estáticos | Ambas ramas de la ablación sin MRS |
 
 - El caudal, los RIMF y el objetivo se dividen por $s_b=\sigma_b+0.01$ mm/h (estadísticas de train de cada
   cuenca). Escalar conmuta con CEEMDAN porque el ruido es relativo a la desviación de la señal.
@@ -296,6 +297,7 @@ validación. Las métricas de la primera ronda están en `results/earlystop/`.
 | DMEL | 16 / 11 | 0.629 | 11 | 0.614 |
 | Ablación: asignación invertida | 10 / 5 | 0.629 | 5 | 0.620 |
 | Ablación: sin MRS | 10 / 5 | 0.625 | 7 | 0.629 |
+| Variante: DMEL + caudal | — (solo en la ronda 2) | — | 11 | 0.624 |
 
 - **La mejor época está siempre entre la 5 y la 11.** Después, la pérdida de train sigue bajando (hasta
   0.26–0.28) y la de validación sube (hasta 0.43–0.45): es sobreajuste. Hacia la época 50 el learning rate

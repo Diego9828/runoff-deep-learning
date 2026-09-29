@@ -158,7 +158,7 @@ Por eso nosotros descomponemos cada ventana usando solo sus 336 horas pasadas.�
 
 ## Slide: La fuga, medida
 
-**Tiempo: 7:00–7:50**
+**Tiempo: 7:00–7:45**
 
 “Medimos la fuga en 200 ventanas de validación. Cada ventana se descompone de
 dos formas: solo con su historia, como hacemos nosotros, y con la historia más
@@ -173,7 +173,7 @@ que viene.”
 
 ## Slide: Nuestro CEEMDAN y MRS
 
-**Tiempo: 7:50–8:40**
+**Tiempo: 7:45–8:35**
 
 “Implementamos CEEMDAN desde cero en numba, con un banco fijo de cien
 realizaciones de ruido, una spline cúbica natural propia y diez iteraciones de
@@ -188,21 +188,23 @@ paper, esta regla reproduce exactamente su agrupación.”
 
 ## Slide: ¿Qué recibe cada rama?
 
-**Tiempo: 8:40–9:25**
+**Tiempo: 8:35–9:30**
 
 “El Informer recibe 18 canales: los cinco componentes de alta frecuencia, las
 11 variables meteorológicas y dos canales estáticos de la cuenca. La LSTM
 recibe 14: el componente de baja frecuencia, las covariables y los estáticos.
+En la variante, la LSTM recibe además el caudal: 15 canales.
 
-Como el caudal varía tres órdenes de magnitud entre cuencas, dividimos el
-caudal, los componentes y el objetivo por la desviación estándar de cada cuenca.
-Entrenar con error cuadrático en ese espacio equivale a la pérdida NSE estrella
-de Kratzert, estándar en modelos multi-cuenca. Los dos canales estáticos
-devuelven la magnitud que el escalado borra.”
+[Señalar la primera ecuación.] Como el caudal varía tres órdenes de magnitud
+entre cuencas, dividimos el caudal, los componentes y el objetivo por s sub b,
+la desviación estándar de la cuenca más 0.01. La red predice en esas unidades y
+multiplicamos por s sub b para volver a milímetros por hora. El error cuadrático
+en ese espacio es la pérdida NSE estrella de Kratzert. Los estáticos devuelven
+la magnitud que el escalado borra.”
 
 ## Slide: Lo que cambiamos del paper
 
-**Tiempo: 9:25–10:05**
+**Tiempo: 9:30–10:05**
 
 “En resumen, descomponemos por ventana para evitar la fuga, agrupamos con votos
 globales y entrenamos las ramas sobre la suma, porque los componentes futuros

@@ -356,24 +356,37 @@ valores de entropía del paper, da exactamente sus grupos.
 
 ## ¿Qué recibe cada rama?
 
-| Entrada | Canales | Contenido |
-|---|---:|---|
-| Informer (HF) | 18 | 5 RIMF + 11 meteorológicas + 2 estáticos |
-| LSTM (LF) | 14 | 1 RIMF + 11 meteorológicas + 2 estáticos |
-| Ablación sin MRS | 14 | caudal + 11 meteorológicas + 2 estáticos |
-
-$$
-\mathcal{L}_{\mathrm{NSE}^*}=\frac{1}{48N}\sum_{n,h}\left(\frac{\hat{y}_{n,h}-y_{n,h}}{\sigma_b+0.01}\right)^2
-$$
+| Entrada | Canales | Contenido | Modelos |
+|---|---:|---|---|
+| HF | 18 | 5 RIMF + 11 meteorológicas + 2 estáticos | Informer de DMEL y de la variante; LSTM de la asignación invertida |
+| LF | 14 | 1 RIMF + 11 meteorológicas + 2 estáticos | LSTM de DMEL; Informer de la asignación invertida |
+| LF + caudal | 15 | 1 RIMF + caudal + 11 meteorológicas + 2 estáticos | LSTM de la variante |
+| Crudo | 14 | caudal + 11 meteorológicas + 2 estáticos | Ambas ramas de la ablación sin MRS |
 
 ::: {.compact}
-Escalar por cuenca evita que las cuencas grandes dominen la pérdida. Los 2 canales estáticos
-(log $s_b$, log $\mu_b$) devuelven la magnitud que el escalado borra.
+$$
+s_b=\sigma_b+0.01\ \text{mm/h},\qquad
+\text{entradas: }\frac{q_t}{s_b},\ \frac{\mathrm{RIMF}_t}{s_b},\qquad
+\text{estáticos: }\log s_b,\ \log(\mu_b+0.01),\qquad
+\hat{y}_{n,h}=s_b\,f_\theta(\mathbf{x}_n)_h
+$$
+
+$$
+\mathcal{L}_{\mathrm{NSE}^*}=\frac{1}{48N}\sum_{n,h}\left(\frac{\hat{y}_{n,h}-y_{n,h}}{s_b}\right)^2
+$$
+:::
+
+::: {.compact}
+$\sigma_b$ y $\mu_b$: desviación y media del caudal de la cuenca $b$ en train. Dividir por $s_b$ evita que las
+cuencas grandes dominen la pérdida; los estáticos, constantes en las 336 h, devuelven la magnitud que el
+escalado borra.
 :::
 
 ::: {.notes}
-(≈1 min) La pérdida NSE* de Kratzert et al. (2019) es el estándar en modelos multi-cuenca y está alineada
-con la métrica NSE.
+(≈1 min) La red predice en "unidades de la cuenca" y se multiplica por s_b para volver a mm/h. La pérdida
+NSE* de Kratzert et al. (2019) es el estándar en modelos multi-cuenca y está alineada con la métrica NSE.
+El +0.01 evita dividir por casi cero en cuencas secas. Después, cada canal de entrada se estandariza con
+estadísticas de train.
 :::
 
 ## Lo que cambiamos del paper
@@ -425,6 +438,7 @@ frecuencia, LSTM para baja y suma de las ramas.
 | DMEL | 16 / 11 | 0.629 | 11 | 0.614 |
 | Asignación invertida | 10 / 5 | 0.629 | 5 | 0.620 |
 | Sin MRS | 10 / 5 | 0.625 | 7 | 0.629 |
+| Variante DMEL + caudal | — (solo ronda 2) | — | 11 | 0.624 |
 :::
 
 - Con 100 épocas se eligen **las mismas épocas** (5–11): el resto es sobreajuste. Costó ~13 h de GPU contra ~2 h.
@@ -520,7 +534,9 @@ NSE a 48 h
 | RMSE (mm/h) | 0.119 | 0.101 | 0.101 | 0.100 | 0.100 |
 | NSE 1 h / 24 h | 0.998 / 0.538 | 0.943 / 0.649 | 0.958 / 0.660 | 0.984 / 0.656 | 0.984 / 0.672 |
 | NSE 48 h | 0.150 | 0.403 | 0.399 | 0.413 | 0.412 |
+| \|EP\| del pico / desfase | 48.9 % / 19 h | 41.3 % / 8 h | 44.8 % / 8 h | 40.3 % / 7.5 h | 36.4 % / 7 h |
 | Cuencas con NSE < 0 | 74 | 37 | 26 | 36 | 39 |
+| Wilcoxon vs DMEL: p (DMEL gana en) | 1.6e-19 (348/508) | — | 4.5e-04 (224/508) | 1.8e-03 (231/508) | 2.0e-04 (221/508) |
 :::
 
 ::: {.notes}
