@@ -57,16 +57,16 @@ def summary(obs, sim, basin):
     lead_nse = per_lead(obs, sim, basin)
     ep, lag = peak_errors(obs, sim, basin)
     row = {
-        "NSE_mediana": np.nanmedian(basin_nse),
-        "KGE_mediana": np.nanmedian(basin_kge),
-        "RMSE": rmse(obs, sim),
-        "MAE": mae(obs, sim),
-        "NSE_global": nse(obs.ravel(), sim.ravel()),
-        "cuencas_NSE<0": int(np.sum(basin_nse < 0)),
-        "EP_pico_mediana_%": float(np.median(ep)),
-        "EP_pico_abs_mediana_%": float(np.median(np.abs(ep))),
-        "desfase_pico_abs_mediana_h": float(np.median(np.abs(lag))),
+        "NSE mediano (por cuenca)": np.nanmedian(basin_nse),
+        "KGE mediano (por cuenca)": np.nanmedian(basin_kge),
+        "RMSE (mm/h)": rmse(obs, sim),
+        "MAE (mm/h)": mae(obs, sim),
+        "NSE global": nse(obs.ravel(), sim.ravel()),
+        "Cuencas con NSE < 0": int(np.sum(basin_nse < 0)),
+        "EP mediano del pico (%)": float(np.median(ep)),
+        "EP absoluto mediano del pico (%)": float(np.median(np.abs(ep))),
+        "Desfase absoluto mediano del pico (h)": float(np.median(np.abs(lag))),
     }
     for h in (1, 6, 12, 24, 48):
-        row[f"NSE_{h}h"] = lead_nse[h - 1]
+        row[f"NSE a {h} h"] = lead_nse[h - 1]
     return row

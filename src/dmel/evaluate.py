@@ -76,6 +76,16 @@ def wilcoxon_table(split, preds, ref):
     return pd.DataFrame(rows).T.rename_axis("comparación"), nse_b
 
 
+def wilcoxon_rows(wtable, preds, ref):
+    """Filas del Wilcoxon contra `ref` con una columna por modelo, para sumarlas a la tabla de métricas."""
+    rows = {}
+    for n in preds:
+        key = f"{label(ref)} vs {label(n)}"
+        wins, pvalue = ("—", "—") if n == ref else (wtable.loc[key, "cuencas donde gana"], wtable.loc[key, "p-valor"])
+        rows[label(n)] = {f"Wilcoxon vs {label(ref)}: p-valor": pvalue, f"Cuencas donde gana {label(ref)}": wins}
+    return pd.DataFrame(rows)
+
+
 def regimes_table(split, preds):
     """Error absoluto relativo (Σ|s - o| / Σo, %) por régimen de caudal (terciles de cada cuenca)."""
     obs, basin = split["obs"], split["basin"]
@@ -196,11 +206,14 @@ def main():
     truth = load_truth(Path(a.data), a.limit)
     report = ["# Resultados\n"]
 
-    preds = {}
+    preds, wtable, nse_b = {}, None, None
     for split in ("val", "test"):
         s = truth[split]
         preds[split] = load_predictions(a.runs, split, s["hist"])
         table = pd.DataFrame({label(n): metrics.summary(s["obs"], pr, s["basin"]) for n, pr in preds[split].items()})
+        if split == "test" and a.ref in preds[split]:
+            wtable, nse_b = wilcoxon_table(s, preds[split], a.ref)
+            table = pd.concat([table, wilcoxon_rows(wtable, preds[split], a.ref)])
         name = "validación" if split == "val" else "test"
         report += [f"## Métricas de {name}\n", write_table(table.rename_axis("métrica"), out, f"metrics_{split}"), ""]
         print(f"\n== {split} ==\n{table.round(3).to_string()}")
@@ -227,8 +240,7 @@ def main():
     peak_df.to_csv(out / "peaks_test.csv", index=False)
     plots.peaks(peak_df, names, figs / "peaks.png")
 
-    if a.ref in p_test:
-        wtable, nse_b = wilcoxon_table(s, p_test, a.ref)
+    if wtable is not None:
         report += ["## Wilcoxon pareado por cuenca (test)\n", write_table(wtable, out, "wilcoxon_test"), ""]
         plots.nse_cdf(nse_b, figs / "nse_cdf.png")
         plots.nse_vs_flow(s, nse_b, [a.ref, "persistence"], figs / "nse_vs_flow.png")
