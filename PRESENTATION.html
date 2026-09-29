@@ -581,40 +581,64 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 </section>
 <section id="qué-recibe-cada-rama" class="slide level2">
 <h2>¿Qué recibe cada rama?</h2>
-<table class="caption-top">
+<table class="caption-top" style="width:100%;">
+<colgroup>
+<col style="width: 23%">
+<col style="width: 30%">
+<col style="width: 23%">
+<col style="width: 23%">
+</colgroup>
 <thead>
 <tr class="header">
 <th>Entrada</th>
 <th style="text-align: right;">Canales</th>
 <th>Contenido</th>
+<th>Modelos</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td>Informer (HF)</td>
+<td>HF</td>
 <td style="text-align: right;">18</td>
 <td>5 RIMF + 11 meteorológicas + 2 estáticos</td>
+<td>Informer de DMEL y de la variante; LSTM de la asignación invertida</td>
 </tr>
 <tr class="even">
-<td>LSTM (LF)</td>
+<td>LF</td>
 <td style="text-align: right;">14</td>
 <td>1 RIMF + 11 meteorológicas + 2 estáticos</td>
+<td>LSTM de DMEL; Informer de la asignación invertida</td>
 </tr>
 <tr class="odd">
-<td>Ablación sin MRS</td>
+<td>LF + caudal</td>
+<td style="text-align: right;">15</td>
+<td>1 RIMF + caudal + 11 meteorológicas + 2 estáticos</td>
+<td>LSTM de la variante</td>
+</tr>
+<tr class="even">
+<td>Crudo</td>
 <td style="text-align: right;">14</td>
 <td>caudal + 11 meteorológicas + 2 estáticos</td>
+<td>Ambas ramas de la ablación sin MRS</td>
 </tr>
 </tbody>
 </table>
-<p><span class="math display">\[
-\mathcal{L}_{\mathrm{NSE}^*}=\frac{1}{48N}\sum_{n,h}\left(\frac{\hat{y}_{n,h}-y_{n,h}}{\sigma_b+0.01}\right)^2
-\]</span></p>
 <div class="compact">
-<p>Escalar por cuenca evita que las cuencas grandes dominen la pérdida. Los 2 canales estáticos (log <span class="math inline">\(s_b\)</span>, log <span class="math inline">\(\mu_b\)</span>) devuelven la magnitud que el escalado borra.</p>
+<p><span class="math display">\[
+s_b=\sigma_b+0.01\ \text{mm/h},\qquad
+\text{entradas: }\frac{q_t}{s_b},\ \frac{\mathrm{RIMF}_t}{s_b},\qquad
+\text{estáticos: }\log s_b,\ \log(\mu_b+0.01),\qquad
+\hat{y}_{n,h}=s_b\,f_\theta(\mathbf{x}_n)_h
+\]</span></p>
+<p><span class="math display">\[
+\mathcal{L}_{\mathrm{NSE}^*}=\frac{1}{48N}\sum_{n,h}\left(\frac{\hat{y}_{n,h}-y_{n,h}}{s_b}\right)^2
+\]</span></p>
+</div>
+<div class="compact">
+<p><span class="math inline">\(\sigma_b\)</span> y <span class="math inline">\(\mu_b\)</span>: desviación y media del caudal de la cuenca <span class="math inline">\(b\)</span> en train. Dividir por <span class="math inline">\(s_b\)</span> evita que las cuencas grandes dominen la pérdida; los estáticos, constantes en las 336 h, devuelven la magnitud que el escalado borra.</p>
 </div>
 <aside class="notes">
-<p>(≈1 min) La pérdida NSE* de Kratzert et al.&nbsp;(2019) es el estándar en modelos multi-cuenca y está alineada con la métrica NSE.</p>
+<p>(≈1 min) La red predice en “unidades de la cuenca” y se multiplica por s_b para volver a mm/h. La pérdida NSE* de Kratzert et al.&nbsp;(2019) es el estándar en modelos multi-cuenca y está alineada con la métrica NSE. El +0.01 evita dividir por casi cero en cuencas secas. Después, cada canal de entrada se estandariza con estadísticas de train.</p>
 <style type="text/css">
         span.MJX_Assistive_MathML {
           position:absolute!important;
@@ -766,6 +790,13 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td style="text-align: right;">0.625</td>
 <td style="text-align: right;">7</td>
 <td style="text-align: right;">0.629</td>
+</tr>
+<tr class="even">
+<td>Variante DMEL + caudal</td>
+<td style="text-align: right;">— (solo ronda 2)</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">0.624</td>
 </tr>
 </tbody>
 </table>
@@ -1022,12 +1053,28 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td style="text-align: right;">0.412</td>
 </tr>
 <tr class="even">
+<td>|EP| del pico / desfase</td>
+<td style="text-align: right;">48.9 % / 19 h</td>
+<td style="text-align: right;">41.3 % / 8 h</td>
+<td style="text-align: right;">44.8 % / 8 h</td>
+<td style="text-align: right;">40.3 % / 7.5 h</td>
+<td style="text-align: right;">36.4 % / 7 h</td>
+</tr>
+<tr class="odd">
 <td>Cuencas con NSE &lt; 0</td>
 <td style="text-align: right;">74</td>
 <td style="text-align: right;">37</td>
 <td style="text-align: right;">26</td>
 <td style="text-align: right;">36</td>
 <td style="text-align: right;">39</td>
+</tr>
+<tr class="even">
+<td>Wilcoxon vs DMEL: p (DMEL gana en)</td>
+<td style="text-align: right;">1.6e-19 (348/508)</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">4.5e-04 (224/508)</td>
+<td style="text-align: right;">1.8e-03 (231/508)</td>
+<td style="text-align: right;">2.0e-04 (221/508)</td>
 </tr>
 </tbody>
 </table>
@@ -1480,7 +1527,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 </thead>
 <tbody>
 <tr class="odd">
-<td>NSE_mediana</td>
+<td>NSE mediano (por cuenca)</td>
 <td>0.492</td>
 <td>0.624</td>
 <td>0.614</td>
@@ -1488,7 +1535,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>0.629</td>
 </tr>
 <tr class="even">
-<td>KGE_mediana</td>
+<td>KGE mediano (por cuenca)</td>
 <td>0.626</td>
 <td>0.693</td>
 <td>0.655</td>
@@ -1496,7 +1543,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>0.641</td>
 </tr>
 <tr class="odd">
-<td>RMSE</td>
+<td>RMSE (mm/h)</td>
 <td>0.119</td>
 <td>0.100</td>
 <td>0.101</td>
@@ -1504,7 +1551,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>0.100</td>
 </tr>
 <tr class="even">
-<td>MAE</td>
+<td>MAE (mm/h)</td>
 <td>0.025</td>
 <td>0.024</td>
 <td>0.025</td>
@@ -1512,7 +1559,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>0.025</td>
 </tr>
 <tr class="odd">
-<td>NSE_global</td>
+<td>NSE global</td>
 <td>0.496</td>
 <td>0.639</td>
 <td>0.634</td>
@@ -1520,7 +1567,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>0.642</td>
 </tr>
 <tr class="even">
-<td>cuencas_NSE&lt;0</td>
+<td>Cuencas con NSE &lt; 0</td>
 <td>74</td>
 <td>39</td>
 <td>37</td>
@@ -1528,7 +1575,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>36</td>
 </tr>
 <tr class="odd">
-<td>EP_pico_mediana_%</td>
+<td>EP mediano del pico (%)</td>
 <td>-48.849</td>
 <td>-31.088</td>
 <td>-33.618</td>
@@ -1536,7 +1583,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>-33.946</td>
 </tr>
 <tr class="even">
-<td>EP_pico_abs_mediana_%</td>
+<td>EP absoluto mediano del pico (%)</td>
 <td>48.908</td>
 <td>36.398</td>
 <td>41.268</td>
@@ -1544,7 +1591,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>40.286</td>
 </tr>
 <tr class="odd">
-<td>desfase_pico_abs_mediana_h</td>
+<td>Desfase absoluto mediano del pico (h)</td>
 <td>19</td>
 <td>7</td>
 <td>8</td>
@@ -1552,7 +1599,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>7.500</td>
 </tr>
 <tr class="even">
-<td>NSE_1h</td>
+<td>NSE a 1 h</td>
 <td>0.998</td>
 <td>0.984</td>
 <td>0.943</td>
@@ -1560,7 +1607,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>0.984</td>
 </tr>
 <tr class="odd">
-<td>NSE_6h</td>
+<td>NSE a 6 h</td>
 <td>0.940</td>
 <td>0.948</td>
 <td>0.907</td>
@@ -1568,7 +1615,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>0.943</td>
 </tr>
 <tr class="even">
-<td>NSE_12h</td>
+<td>NSE a 12 h</td>
 <td>0.821</td>
 <td>0.860</td>
 <td>0.840</td>
@@ -1576,7 +1623,7 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>0.857</td>
 </tr>
 <tr class="odd">
-<td>NSE_24h</td>
+<td>NSE a 24 h</td>
 <td>0.538</td>
 <td>0.672</td>
 <td>0.649</td>
@@ -1584,12 +1631,28 @@ M(\mathbf{q}_i,\mathbf{K}) &amp;= \underbrace{\ln\sum_{j=1}^{L_K} e^{s_{ij}}}_{\
 <td>0.656</td>
 </tr>
 <tr class="even">
-<td>NSE_48h</td>
+<td>NSE a 48 h</td>
 <td>0.150</td>
 <td>0.412</td>
 <td>0.403</td>
 <td>0.399</td>
 <td>0.413</td>
+</tr>
+<tr class="odd">
+<td>Wilcoxon vs DMEL (paper): p-valor</td>
+<td>1.6e-19</td>
+<td>2.0e-04</td>
+<td>—</td>
+<td>4.5e-04</td>
+<td>1.8e-03</td>
+</tr>
+<tr class="even">
+<td>Cuencas donde gana DMEL (paper)</td>
+<td>348/508</td>
+<td>221/508</td>
+<td>—</td>
+<td>224/508</td>
+<td>231/508</td>
 </tr>
 </tbody>
 </table>
