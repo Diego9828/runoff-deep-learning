@@ -226,6 +226,15 @@ El análisis completo está en `REPORT.qmd` / `REPORT.html`. Las predicciones de
 - Una sola semilla por modelo; la variación entre dos corridas iguales (~0.01–0.015 de NSE mediano) es
   comparable a las diferencias entre modelos.
 
+## Autores
+
+Proyecto realizado en conjunto por:
+
+- [Piero Palacios Bernuy](https://github.com/pipaber) (@pipaber)
+- [Diego Sanchez Salazar](https://github.com/Diego9828) (@Diego9828)
+
+Repositorio original: [pipaber/runoff-deep-learning](https://github.com/pipaber/runoff-deep-learning).
+
 ## Uso de IA generativa
 
 Este trabajo se desarrolló con asistencia de IA generativa (Claude, de Anthropic) para escribir y
